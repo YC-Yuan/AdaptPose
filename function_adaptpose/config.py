@@ -2,6 +2,24 @@ import argparse
 
 
 
+'''
+--dataset 原分布数据 默认h36m
+--dataset_target 目标分布数据 默认3dhp
+
+--keypoints 2D检测 默认gt
+--keypoints_target 2D检测 默认gt
+
+--actions 训练、测试的动作 默认全选
+--checkpoint ckpt路径
+
+--snapshot
+--note
+
+
+--evaluate 要evaluate的ckpt文件名
+--resume 要resume的ckpt文件名
+'''
+
 def get_parse_args():
     parser = argparse.ArgumentParser(description='PyTorch training script')
 

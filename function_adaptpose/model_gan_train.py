@@ -8,7 +8,7 @@ import torch.nn as nn
 # add model for generator and discriminator
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from code.common.viz import plot_16j_2d
+from common.viz import plot_16j_2d
 
 from common.camera import project_to_2d
 from common.data_loader import PoseDataSet,PoseDataSet2

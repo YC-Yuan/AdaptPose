@@ -13,6 +13,7 @@ from function_adaptpose.data_preparation import data_preparation
 from function_baseline.model_pos_preparation import model_pos_preparation
 from function_adaptpose.model_pos_eval import evaluate
 
+# 测分数的脚本
 
 def main(args):
     print('==> Using settings {}'.format(args))
