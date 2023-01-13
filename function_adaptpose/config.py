@@ -62,6 +62,7 @@ def get_parse_args():
     parser.set_defaults(max_norm=True)
 
     # Experimental setting
+    # 设置random_seed训练GAN
     parser.add_argument('--random_seed', type=int, default=0)  # change this if GAN collapse
     parser.add_argument('--downsample', default=1, type=int, metavar='FACTOR', help='downsample frame rate by factor')
     parser.add_argument('--pretrain', default=True, type=lambda x: (str(x).lower() == 'true'), help='pretrain model')

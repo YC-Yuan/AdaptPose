@@ -263,9 +263,9 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
     tmp_2d_pose_buffer_list = []
     tmp_camparam_buffer_list = []
 
+    # 打印进度
     bar = Bar('Train pose gan', max=len(data_dict['train_gt2d3d_loader']))
-    for i, ((inputs_3d, _, _, cam_param), target_d2d, target_d3d,target_d3d2) in enumerate(
-            zip(data_dict['train_gt2d3d_loader'], data_dict['target_2d_loader'], data_dict['target_3d_loader'],data_dict['target_3d_loader2'])):
+    for i, ((inputs_3d, _, _, cam_param), target_d2d, target_d3d,target_d3d2) in enumerate(zip(data_dict['train_gt2d3d_loader'], data_dict['target_2d_loader'], data_dict['target_3d_loader'],data_dict['target_3d_loader2'])):
 
         if i>(section+1)*300 or i<section*300:
             continue
@@ -397,11 +397,14 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
           
 
         # plot a image for visualization
-        if i % 100 == 0:
+        # if i % 100 == 0:
             # plot_poseaug(inputs_3d[:,0,pad], inputs_2d[:,0,pad], g_rlt, cam_param, summary.epoch, i, args)
-            plot_16j(inputs_3d[i:i+1,0,:].cpu().detach().numpy())
-            plot_16j(g_rlt['pose_rt'][i,:].cpu().detach().numpy())
-            plot_16j_2d(outputs_2d_rt[i].cpu().detach().numpy())
+            
+            # 节省画图时间禁用
+            # plot_16j(inputs_3d[i:i+1,0,:].cpu().detach().numpy())
+            # plot_16j(g_rlt['pose_rt'][i,:].cpu().detach().numpy())
+            # plot_16j_2d(outputs_2d_rt[i].cpu().detach().numpy())
+            
             # plot_16j(inputs_3d[100:101,0,pad].cpu().detach().numpy())
             # plot_16j(g_rlt['pose_rt'][100].cpu().detach().numpy())
 

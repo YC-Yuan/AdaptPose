@@ -69,8 +69,9 @@ def main(args):
     dhpp1_best = None
     s911p1_best = None
 
+    # 默认训练50个epoch
     for _ in range(start_epoch, args.epochs):
-
+        # epoch0的参数准备
         if summary.epoch == 0:
             poseaug_dict['optimizer_G'].zero_grad()
             poseaug_dict['optimizer_G'].step()
@@ -79,7 +80,6 @@ def main(args):
             poseaug_dict['optimizer_d2d'].zero_grad()
             poseaug_dict['optimizer_d2d'].step()
         if summary.epoch == 0:
-            
             # evaluate the pre-train model for epoch 0.
             h36m_p1, h36m_p2, dhp_p1, dhp_p2 = evaluate_posenet(args, data_dict, model_pos, model_pos_eval, device,
                                                                   summary, writer, tag='_fake')
@@ -88,22 +88,25 @@ def main(args):
             h36m_p1, h36m_p2, dhp_p1, dhp_p2 =200,200,200,200
             summary.summary_epoch_update()
       
-  
         # Train for one epoch
         # We split an epoch to five sections inorder not to face memrory problem while generating new data
         for kk in range(5):
+            # 此方法传入kk,gan分五次训练
             train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sample, fake_2d_sample, summary, writer, section=kk)
 
+            # warmup默认为2，大于2后train_posenet
             if summary.epoch > args.warmup:
                 train_posenet(model_pos, data_dict['train_fake2d3d_loader'], posenet_optimizer, criterion, device)
                 h36m_p1, h36m_p2, dhp_p1, dhp_p2 = evaluate_posenet(args, data_dict, model_pos, model_pos_eval, device,
                                                                     summary, writer, tag='_fake')
                 # Update checkpoint
+                # 每epoch更新五次
                 if dhpp1_best is None or dhpp1_best > dhp_p1:
                     dhpp1_best = dhp_p1
                     logger.record_args("==> Saving checkpoint at epoch '{}', with dhp_p1 {}".format(summary.epoch, dhpp1_best))
                     save_ckpt({'epoch': summary.epoch, 'model_pos': model_pos.state_dict()}, args.checkpoint, suffix='best_dhp_p1')
 
+        # warmup默认为2，大于2后train_posenet
         if summary.epoch > args.warmup:
             train_posenet(model_pos, data_dict['train_gt2d3d_loader'], posenet_optimizer, criterion, device)
             h36m_p1, h36m_p2, dhp_p1, dhp_p2 = evaluate_posenet(args, data_dict, model_pos, model_pos_eval, device,
@@ -120,6 +123,7 @@ def main(args):
         # Update log file
         logger.append([summary.epoch, lr_now, h36m_p1, h36m_p2, dhp_p1, dhp_p2])
 
+        # 每个epoch查看效果
         if s911p1_best is None or s911p1_best > h36m_p1:
             s911p1_best = h36m_p1
             logger.record_args("==> Saving checkpoint at epoch '{}', with s911p1 {}".format(summary.epoch, s911p1_best))

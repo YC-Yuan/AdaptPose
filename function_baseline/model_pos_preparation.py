@@ -7,7 +7,7 @@ import torch
 from models_baseline.mlp.linear_model import LinearModel, init_weights
 from models_baseline.videopose.model_VideoPose3D import TemporalModelOptimized1f, TemporalModel
 
-
+# 模型在这里定义
 def model_pos_preparation(args, dataset, device):
     """
     return a posenet Model: with Bx16x2 --> posenet --> Bx16x3
@@ -26,6 +26,7 @@ def model_pos_preparation(args, dataset, device):
             filter_widths = [3, 3, 3]
         elif args.pad == 40:
             filter_widths = [3, 3, 3, 3]
+        # 根据pad创建模型，基于VideoPose
         model_pos = TemporalModelOptimized1f(16, 2, 15, filter_widths=filter_widths, causal=False,
                                              dropout=0.25, channels=1024)
     else:
@@ -35,7 +36,7 @@ def model_pos_preparation(args, dataset, device):
     print("==> Total parameters for model {}: {:.2f}M"
           .format(args.posenet_name, sum(p.numel() for p in model_pos.parameters()) / 1000000.0))
 
-    # 灵活载入预训练参数
+    # 灵活载入预训练参数，默认有pretrain，path需要手动指定
     if args.pretrain:
         tmp_ckpt = torch.load(args.pretrain_path)
         model_pos.load_state_dict(tmp_ckpt['state_dict'])
