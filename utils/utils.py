@@ -46,6 +46,7 @@ class Summary(object):
         self.phase = self.phase + 1
 
 
+# 平均数计算器，update传入把val累加n遍
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 

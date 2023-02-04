@@ -8,7 +8,7 @@ import pytorch3d.transforms as torch3d
 
 
 from utils.gan_utils import get_bone_lengthbypose3d, get_bone_unit_vecbypose3d, \
-    get_pose3dbyBoneVec, blaugment9to15,get_BoneVecbypose3d
+    get_pose3dbyBoneVec, blaugment9to15, get_BoneVecbypose3d
 
 
 def init_weights(m):
@@ -47,9 +47,13 @@ class Linear(nn.Module):
 class PoseGenerator(nn.Module):
     def __init__(self, args, input_size=16 * 3):
         super(PoseGenerator, self).__init__()
-        self.BAprocess = BAGenerator(input_size=16 * 3,noise_channle=45)
-        self.BLprocess = BLGenerator(input_size=16 * 3, blr_tanhlimit=args.blr_tanhlimit)
-        self.RTprocess = RTGenerator(input_size=16 * 3) #target
+        # 旋转角度
+        self.BAprocess = BAGenerator(input_size=16 * 3, noise_channle=45)
+        # 改变长度
+        self.BLprocess = BLGenerator(
+            input_size=16 * 3, blr_tanhlimit=args.blr_tanhlimit)
+        # 旋转&位移
+        self.RTprocess = RTGenerator(input_size=16 * 3)  # target
 
     def forward(self, inputs_3d, target_2d):
         '''
@@ -57,10 +61,12 @@ class PoseGenerator(nn.Module):
         :param inputs_3d: nx16x3, with hip root
         :return: nx16x3
         '''
-        
-        pose_ba, ba_diff = self.BAprocess(inputs_3d)  # diff may be used for div loss
+
+        # diff may be used for div loss
+        pose_ba, ba_diff = self.BAprocess(inputs_3d)
         pose_bl, blr = self.BLprocess(inputs_3d, pose_ba)  # blr used for debug
-        pose_rt, rt = self.RTprocess(inputs_3d,pose_bl)  # rt=(r,t) used for debug
+        pose_rt, rt = self.RTprocess(
+            inputs_3d, pose_bl)  # rt=(r,t) used for debug
 
         return {'pose_ba': pose_ba,
                 'ba_diff': ba_diff,
@@ -87,44 +93,49 @@ class BAGenerator(nn.Module):
         self.input_size = input_size  # 16 * 3
 
         # process input to linear size
-        self.w1 = nn.Linear(self.input_size + self.noise_channle, self.linear_size)
-        self.batch_norm1 = nn.BatchNorm1d(self.linear_size)
+        self.w1 = nn.Linear(self.input_size + self.noise_channle,
+                            self.linear_size)  # 16*3 + 45
+        self.batch_norm1 = nn.BatchNorm1d(self.linear_size)  # 256
 
+        # 2层 256线性
         self.linear_stages = []
         for l in range(num_stage):
             self.linear_stages.append(Linear(self.linear_size))
         self.linear_stages = nn.ModuleList(self.linear_stages)
 
         # post processing
-        self.w2 = nn.Linear(self.linear_size, self.input_size-3+15) #*2+(self.input_size-3)//3
+        # *2+(self.input_size-3)//3
+        self.w2 = nn.Linear(self.linear_size, self.input_size-3+15)
 
         self.relu = nn.LeakyReLU(inplace=True)
 
+    # 输入3d原始数据
     def forward(self, inputs_3d):
         '''
         :param inputs_3d: nx16x3.
         :return: nx16x3
         '''
         # convert 3d pose to root relative
-        inputs_3d=inputs_3d[:,0]
-        root_origin = inputs_3d[:, :,:1, :] * 1.0
-        x = inputs_3d - inputs_3d[:,:, :1, :]  # x: root relative
+        inputs_3d = inputs_3d[:, 0]  # 提取所有数据的第一个数
+        root_origin = inputs_3d[:, :, :1, :] * 1.0
+        x = inputs_3d - inputs_3d[:, :, :1, :]  # x: root relative
 
         # extract length, unit bone vec
         bones_unit = get_bone_unit_vecbypose3d(x)
         bones_length = get_bone_lengthbypose3d(x)
-        bones_vec=get_BoneVecbypose3d(x)
-        middle_frame=int((x.shape[1]-1)/2)
-        bones_vec=bones_vec[:,middle_frame].contiguous()
-            
-        # pre-processing
+        bones_vec = get_BoneVecbypose3d(x)
+        middle_frame = int((x.shape[1]-1)/2)
+        bones_vec = bones_vec[:, middle_frame].contiguous()
+
+        # pre-processing，拼接噪声
         bones_vec = bones_vec.view(bones_vec.size(0), -1)
-        x_=x[:,middle_frame].contiguous()
+        x_ = x[:, middle_frame].contiguous()
         x_ = x_.view(x_.size(0), -1)
         noise = torch.randn(x_.shape[0], self.noise_channle, device=x.device)
 
-        y = self.w1(torch.cat((x_, noise), dim=-1)) #torch.cat((bones_vec, noise), dim=-1)
-  
+        # torch.cat((bones_vec, noise), dim=-1)
+        y = self.w1(torch.cat((x_, noise), dim=-1))
+
         y = self.batch_norm1(y)
 
         y = self.relu(y)
@@ -136,28 +147,32 @@ class BAGenerator(nn.Module):
         y = self.w2(y)
         y = y.view(x.size(0), -1, 4)
 
-        y_axis=y[:,:,:3]
+        y_axis = y[:, :, :3]
 
-        y_axis = y_axis/torch.linalg.norm(y_axis,dim=-1,keepdim=True)
-        y_axis = y_axis.unsqueeze(1).repeat(1,bones_unit.shape[1],1,1)
-        y_theta =y[:,:,3:4]
-        y_theta=y_theta.unsqueeze(1).repeat(1,bones_unit.shape[1],1,1)
-        y_theta=y_theta/x.shape[1]
-        y_theta_t=torch.arange(x.shape[1]).unsqueeze(0).unsqueeze(2).unsqueeze(3).cuda()
-        y_theta_t=y_theta_t.repeat(bones_unit.shape[0],1,bones_unit.shape[2],1)
-        y_theta=y_theta*y_theta_t
+        y_axis = y_axis/torch.linalg.norm(y_axis, dim=-1, keepdim=True)
+        y_axis = y_axis.unsqueeze(1).repeat(1, bones_unit.shape[1], 1, 1)
+        y_theta = y[:, :, 3:4]
+        y_theta = y_theta.unsqueeze(1).repeat(1, bones_unit.shape[1], 1, 1)
+        y_theta = y_theta/x.shape[1]
+        y_theta_t = torch.arange(x.shape[1]).unsqueeze(
+            0).unsqueeze(2).unsqueeze(3).cuda()
+        y_theta_t = y_theta_t.repeat(
+            bones_unit.shape[0], 1, bones_unit.shape[2], 1)
+        y_theta = y_theta*y_theta_t
 
         y_axis = y_axis*y_theta
-        y_rM = torch3d.axis_angle_to_matrix(y_axis.view(-1,3))[..., :3, :3]  # Nx4x4->Nx3x3 rotation matrix
-        y_rM=y_rM.view(bones_unit.shape[0],bones_unit.shape[1],bones_unit.shape[2],3,3)
-        modifyed_unit=torch.matmul(y_rM,bones_unit.unsqueeze(-1))[...,0]
+        y_rM = torch3d.axis_angle_to_matrix(
+            y_axis.view(-1, 3))[..., :3, :3]  # Nx4x4->Nx3x3 rotation matrix
+        y_rM = y_rM.view(
+            bones_unit.shape[0], bones_unit.shape[1], bones_unit.shape[2], 3, 3)
+        modifyed_unit = torch.matmul(y_rM, bones_unit.unsqueeze(-1))[..., 0]
         # # modify the bone angle with length unchanged.
         # y=y.unsqueeze(1).repeat(1,bones_unit.shape[1],1,1)
         # y=y/x.shape[1]
         # y_t=torch.arange(x.shape[1]).unsqueeze(0).unsqueeze(2).unsqueeze(3).cuda()
         # y_t=y_t.repeat(bones_unit.shape[0],1,bones_unit.shape[2],bones_unit.shape[3])
         # y=y*y_t
-    
+
         # # # print(bones_unit.shape)
         # modifyed =  bones_unit[:,middle_frame:middle_frame+1].repeat(1,y.shape[1],1,1) +y
 
@@ -165,7 +180,7 @@ class BAGenerator(nn.Module):
 
         # fix bone segment from pelvis to thorax to avoid pure rotation of whole body without ba changes.
         tmp_mask = torch.ones_like(bones_unit)
-        tmp_mask[:,:, [6, 7], :] = 0.
+        tmp_mask[:, :, [6, 7], :] = 0.
         modifyed_unit = modifyed_unit * tmp_mask + bones_unit * (1 - tmp_mask)
 
         cos_angle = torch.sum(modifyed_unit * bones_unit, dim=-1)
@@ -173,7 +188,7 @@ class BAGenerator(nn.Module):
 
         modifyed_bone = modifyed_unit * bones_length
 
-        # convert bone vec back to 3D pose
+        # 将骨骼转回3D数据
         out = get_pose3dbyBoneVec(modifyed_bone) + root_origin
 
         return out, ba_diff
@@ -195,7 +210,8 @@ class RTGenerator(nn.Module):
         self.input_size = input_size  # 16 * 3
 
         # process input to linear size -> for R
-        self.w1_R = nn.Linear(self.input_size + self.noise_channle, self.linear_size)
+        self.w1_R = nn.Linear(
+            self.input_size + self.noise_channle, self.linear_size)
         self.batch_norm_R = nn.BatchNorm1d(self.linear_size)
 
         self.linear_stages_R = []
@@ -204,7 +220,8 @@ class RTGenerator(nn.Module):
         self.linear_stages_R = nn.ModuleList(self.linear_stages_R)
 
         # process input to linear size -> for T
-        self.w1_T = nn.Linear(self.input_size + self.noise_channle, self.linear_size) 
+        self.w1_T = nn.Linear(
+            self.input_size + self.noise_channle, self.linear_size)
         self.batch_norm_T = nn.BatchNorm1d(self.linear_size)
 
         self.linear_stages_T = []
@@ -215,20 +232,20 @@ class RTGenerator(nn.Module):
         # post processing
 
         self.w2_R = nn.Linear(self.linear_size, 7)
-        self.w2_T = nn.Linear(self.linear_size, 3) 
+        self.w2_T = nn.Linear(self.linear_size, 3)
 
         self.relu = nn.LeakyReLU(inplace=True)
 
-    def forward(self,inputs_3d,augx):
+    def forward(self, inputs_3d, augx):
         '''
         :param inputs_3d: nx16x3
         :return: nx16x3
         '''
         # convert 3d pose to root relative
-        inputs_3d=inputs_3d[:,0]
-        middle_frame=int((inputs_3d.shape[1]-1)/2)
-        pad=inputs_3d.shape[1]
-        inputs_3d=inputs_3d[:,middle_frame]
+        inputs_3d = inputs_3d[:, 0]
+        middle_frame = int((inputs_3d.shape[1]-1)/2)
+        pad = inputs_3d.shape[1]
+        inputs_3d = inputs_3d[:, middle_frame]
         root_origin = inputs_3d[:, :1, :] * 1.0
         x = inputs_3d - inputs_3d[:, :1, :]  # x: root relative
 
@@ -240,27 +257,28 @@ class RTGenerator(nn.Module):
 
         # caculate R
         noise = torch.randn(x.shape[0], self.noise_channle, device=x.device)
-        r = self.w1_R(torch.cat((x, noise), dim=-1)) #torch.cat((x, noise), dim=1)
+        # torch.cat((x, noise), dim=1)
+        r = self.w1_R(torch.cat((x, noise), dim=-1))
         r = self.batch_norm_R(r)
         r = self.relu(r)
         for i in range(self.num_stage):
             r = self.linear_stages_R[i](r)
 
         # r = self.w2_R(r)
-        r_mean=r[:,:3]
-        r_std=r[:,3:6]*r[:,3:6]
-        r_axis = torch.normal(mean=r_mean,std=r_std)
-        r_axis = r_axis/torch.linalg.norm(r_axis,dim=-1,keepdim=True)
-        r_axis = r_axis*r[:,6:7]
+        r_mean = r[:, :3]
+        r_std = r[:, 3:6]*r[:, 3:6]
+        r_axis = torch.normal(mean=r_mean, std=r_std)
+        r_axis = r_axis/torch.linalg.norm(r_axis, dim=-1, keepdim=True)
+        r_axis = r_axis*r[:, 6:7]
 
-        rM=torch3d.axis_angle_to_matrix(r_axis) #axis_angle
+        rM = torch3d.axis_angle_to_matrix(r_axis)  # axis_angle
         # rM = torch3d.euler_angles_to_matrix(r_axis,["Z","Y","X"])  #euler_angle
         # rM= torch3d.quaternion_to_matrix(r_axis) #quaternion
-        
 
         # caculate T
         noise = torch.randn(x.shape[0], self.noise_channle, device=x.device)
-        t = self.w1_T(torch.cat((x, noise), dim=-1)) #torch.cat((x, noise), dim=1)
+        # torch.cat((x, noise), dim=1)
+        t = self.w1_T(torch.cat((x, noise), dim=-1))
         t = self.batch_norm_T(t)
         t = self.relu(t)
         for i in range(self.num_stage):
@@ -273,11 +291,11 @@ class RTGenerator(nn.Module):
 
         # operat RT on original data - augx
         augx = augx - augx[:, :, :1, :]  # x: root relative
-        augx = augx.permute(0, 1, 3,2).contiguous()
-        rM=rM.unsqueeze(1).repeat(1,pad,1,1)
+        augx = augx.permute(0, 1, 3, 2).contiguous()
+        rM = rM.unsqueeze(1).repeat(1, pad, 1, 1)
         augx_r = torch.matmul(rM, augx)
-        augx_r = augx_r.permute(0,1,3, 2).contiguous()
-        t=t.unsqueeze(1).repeat(1,pad,1,1)
+        augx_r = augx_r.permute(0, 1, 3, 2).contiguous()
+        t = t.unsqueeze(1).repeat(1, pad, 1, 1)
         augx_rt = augx_r + t
 
         return augx_rt, (r, t)  # return r t for debug
@@ -300,7 +318,8 @@ class BLGenerator(nn.Module):
         self.input_size = input_size + 15  # 16 * 3 + bl
 
         # process input to linear size -> for R
-        self.w1_BL = nn.Linear( self.input_size +self.noise_channle, self.linear_size) 
+        self.w1_BL = nn.Linear(
+            self.input_size + self.noise_channle, self.linear_size)
         self.batch_norm_BL = nn.BatchNorm1d(self.linear_size)
 
         self.linear_stages_BL = []
@@ -319,37 +338,38 @@ class BLGenerator(nn.Module):
         :return: nx16x3
         '''
         # convert 3d pose to root relative
-        inputs_3d=inputs_3d[:,0]
+        inputs_3d = inputs_3d[:, 0]
 
         root_origin = inputs_3d[:, :, :1, :] * 1.0
         x = inputs_3d - inputs_3d[:, :, :1, :]  # x: root relative
         # pre-processing
-        x = x.view(x.size(0),x.size(1),  -1)
+        x = x.view(x.size(0), x.size(1),  -1)
 
         # caculate blr
-        bones_length_x = get_bone_lengthbypose3d(x.view(x.size(0),x.size(1),-1, 3)).squeeze(-1) 
+        bones_length_x = get_bone_lengthbypose3d(
+            x.view(x.size(0), x.size(1), -1, 3)).squeeze(-1)
 
-        middle_frame=int((x.shape[1]-1)/2)
-        pad=x.shape[1]
-        x=x[:,middle_frame]
-        bones_length_x=bones_length_x[:,middle_frame]
-       
-        
+        middle_frame = int((x.shape[1]-1)/2)
+        pad = x.shape[1]
+        x = x[:, middle_frame]
+        bones_length_x = bones_length_x[:, middle_frame]
+
         noise = torch.randn(x.shape[0], self.noise_channle, device=x.device)
-        blr = self.w1_BL(torch.cat((x, bones_length_x, noise), dim=-1)) 
+        blr = self.w1_BL(torch.cat((x, bones_length_x, noise), dim=-1))
         blr = self.batch_norm_BL(blr)
         blr = self.relu(blr)
         for i in range(self.num_stage):
             blr = self.linear_stages_BL[i](blr)
 
         blr = self.w2_BL(blr)
-       
+
         # create a mask to filter out 8th blr to avoid ambiguity (tall person at far may have same 2D with short person at close point).
-        tmp_mask = torch.from_numpy(np.array([[1, 1, 1, 1, 0, 1, 1, 1, 1]]).astype('float32')).to(blr.device)
+        tmp_mask = torch.from_numpy(
+            np.array([[1, 1, 1, 1, 0, 1, 1, 1, 1]]).astype('float32')).to(blr.device)
         blr = blr * tmp_mask
         # operate BL modification on original data
         blr = nn.Tanh()(blr) * self.blr_tanhlimit  # allow +-20% length change.
-        blr=blr.unsqueeze(1).repeat(1,pad,1)
+        blr = blr.unsqueeze(1).repeat(1, pad, 1)
         bones_length = get_bone_lengthbypose3d(augx)
         augx_bl = blaugment9to15(augx, bones_length, blr.unsqueeze(3))
         return augx_bl, blr  # return blr for debug
@@ -360,19 +380,21 @@ def random_bl_aug(x):
     :param x: nx16x3
     :return: nx16x3
     '''
-    bl_15segs_templates_mdifyed = np.load('./data_extra/bone_length_npy/hm36s15678_bl_templates.npy')
+    bl_15segs_templates_mdifyed = np.load(
+        './data_extra/bone_length_npy/hm36s15678_bl_templates.npy')
 
     # convert 3d pose to root relative
     root = x[:, 0, :, :1, :] * 1.0
-    x = x - x[:, : , : , :1, :]
-    
+    x = x - x[:, :, :, :1, :]
 
     # extract length, unit bone vec
     bones_unit = get_bone_unit_vecbypose3d(x)
 
     # prepare a bone length list for augmentation.
-    tmp_idx = np.random.choice(bl_15segs_templates_mdifyed.shape[0], x.shape[0])
-    bones_length = torch.from_numpy(bl_15segs_templates_mdifyed[tmp_idx].astype('float32')).unsqueeze(2).unsqueeze(1)
+    tmp_idx = np.random.choice(
+        bl_15segs_templates_mdifyed.shape[0], x.shape[0])
+    bones_length = torch.from_numpy(bl_15segs_templates_mdifyed[tmp_idx].astype(
+        'float32')).unsqueeze(2).unsqueeze(1)
 
     modifyed_bone = bones_unit * bones_length.to(x.device)
 

@@ -16,9 +16,11 @@ def create_2d_data(data_path, dataset,tag):
             for cam_idx, kps in enumerate(keypoints[subject][action]):
                 # Normalize camera frame
                 cam = dataset.cameras()[subject][cam_idx]
+                # skii
                 if tag=='skii':
                     kps-=kps[:,:1]
                     kps/=np.linalg.norm(kps,axis=(-1,-2),keepdims=True)
+                # 非skii
                 else:
                     kps[..., :2] = normalize_screen_coordinates(kps[..., :2], w=cam['res_w'], h=cam['res_h'])
                 keypoints[subject][action][cam_idx] = kps

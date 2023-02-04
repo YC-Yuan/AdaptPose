@@ -25,6 +25,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import os
 
+# criterion计算均方误差
 def get_adv_loss(model_dis, data_real, data_fake, criterion, summary, writer, writer_name):
     device = torch.device("cuda")
     # Adversarial losses
@@ -234,6 +235,8 @@ def rotation_angles(X):
     R=torch.cat((e1.unsqueeze(-1),e2.unsqueeze(-1),e3.unsqueeze(-1)),dim=-1)
     euler_angles=torch3d.matrix_to_euler_angles(R,convention=['Z','Y','X'])
     return euler_angles
+
+# criterion 是算均方误差的
 def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sample, fake_2d_sample, summary, writer,section):
     device = torch.device("cuda")
     batch_time = AverageMeter()
@@ -265,17 +268,18 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
 
     # 打印进度
     bar = Bar('Train pose gan', max=len(data_dict['train_gt2d3d_loader']))
+    # 拿数据做训练
     for i, ((inputs_3d, _, _, cam_param), target_d2d, target_d3d,target_d3d2) in enumerate(zip(data_dict['train_gt2d3d_loader'], data_dict['target_2d_loader'], data_dict['target_3d_loader'],data_dict['target_3d_loader2'])):
-
+        # 一次训练300，section循环0 1 2 3 4
         if i>(section+1)*300 or i<section*300:
             continue
 
         pad=(inputs_3d.shape[2]-1)//2
                 
         rows=torch.sum(inputs_3d==0,dim=(-1,-2,-3,-4))<(2*pad+1)*16*2
-        inputs_3d=inputs_3d[rows]
-        cam_param=cam_param[rows]
-        target_d2d, target_d3d=target_d2d[rows], target_d3d[rows]
+        inputs_3d=inputs_3d[rows] # 原分布数据
+        cam_param=cam_param[rows] # 相机角度
+        target_d2d, target_d3d=target_d2d[rows], target_d3d[rows] # 目标分布2d、3d数据
         lr_now = g_optimizer.param_groups[0]['lr']
 
         ##################################################
@@ -297,9 +301,9 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
 
         
         inputs_3d, inputs_3d_random,target_d2d,cam_param = inputs_3d.to(device), inputs_3d_random.to(device),target_d2d.to(device),cam_param.to(device)
-        inputs_2d = project_to_2d(inputs_3d, cam_param)
+        inputs_2d = project_to_2d(inputs_3d, cam_param) # 根据相机角度，将输入3d投影为2d
 
-        # poseaug: BA BL RT
+        # poseaug: BA（Bone Angle） BL（Bone Length） RT（Rotation Transform）
         g_rlt = model_G(inputs_3d_random,target_d2d)
 
         # extract the generator result
@@ -322,15 +326,11 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
         #     plt.savefig(image_name)
         #     plt.close('all')
 
-        outputs_2d_ba = project_to_2d(outputs_3d_ba, cam_param)  # fake 2d data
-        outputs_2d_rt = project_to_2d(outputs_3d_rt, cam_param)  # fake 2d data
+        outputs_2d_ba = project_to_2d(outputs_3d_ba, cam_param)  # fake 2d data，转角度
+        outputs_2d_rt = project_to_2d(outputs_3d_rt, cam_param)  # fake 2d data，三阶段后
 
-        # adv loss
-
-
-
+        # adv loss，3d用输入和输出计算、2d用目标和输出计算
         adv_3d_loss = get_adv_loss(model_d3d, inputs_3d[:,0,pad], outputs_3d_ba[:,pad], criterion, summary, writer, writer_name='g3d')
-        
         adv_2d_loss = get_adv_loss(model_d2d, target_d2d, outputs_2d_rt[:,pad], criterion, summary, writer, writer_name='g2d')
         # diff loss. encourage diversity.
         ###################################################
@@ -342,6 +342,7 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
                                           inputs_2d, inputs_3d, outputs_2d_ba, outputs_3d_ba, outputs_2d_rt,
                                           outputs_3d_rt,target_d2d,cam_param,pad=pad) 
 
+        # 多个loss求和，2/3d的adv，diff_loss(鼓励多样性)
         if summary.epoch > args.warmup:                   
             gen_loss = adv_2d_loss * args.gloss_factord2d + \
                        adv_3d_loss * args.gloss_factord3d + \
@@ -370,12 +371,11 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
             set_grad([model_G], False)
             set_grad([model_pos], False)
 
-            # d3d training
-
+            # 训练3d判别器
             train_dis(model_d3d, target_d3d, outputs_3d_ba[:,pad], criterion, summary, writer, writer_name='d3d',
                       fake_data_pool=fake_3d_sample, optimizer=d3d_optimizer)
-            # d2d training
-
+            
+            # 训练2d判别器
             train_dis(model_d2d, target_d2d, outputs_2d_rt[:,pad], criterion, summary, writer, writer_name='d2d',
                       fake_data_pool=fake_2d_sample, optimizer=d2d_optimizer)
 

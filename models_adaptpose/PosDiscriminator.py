@@ -68,6 +68,7 @@ class Pos3dDiscriminator(nn.Module):
         # convert 3d pose to root relative
         inputs_3d=inputs_3d.squeeze()
         x = inputs_3d - inputs_3d[:, :1, :]  # x: root relative
+        # 根据3d点，计算骨骼的单位向量
         bv_unit = get_bone_unit_vecbypose3d(x)
         x = get_pose3dbyBoneVec(bv_unit)
 
@@ -85,18 +86,19 @@ class Pos3dDiscriminator(nn.Module):
         # plot_16j(np.concatenate((modifyed_x[:1].cpu().detach().numpy(),x[:1].cpu().detach().numpy()),axis=0),frame_legend=['mod','gt'])
         # KCS path
         
+        # 左手
         psi_vec_lh = kcs_layer_lh(modifyed_x).view((x.size(0), -1))
         k_lh = self.kcs_path_1(psi_vec_lh)
-
+        # 右手
         psi_vec_rh = kcs_layer_rh(modifyed_x).view((x.size(0), -1))
         k_rh = self.kcs_path_2(psi_vec_rh)
-
+        # 左腿
         psi_vec_ll = kcs_layer_ll(modifyed_x).view((x.size(0), -1))
         k_ll = self.kcs_path_3(psi_vec_ll)
-
+        # 右腿
         psi_vec_rl = kcs_layer_rl(modifyed_x).view((x.size(0), -1))
         k_rl = self.kcs_path_4(psi_vec_rl)
-
+        # 躯干
         psi_vec_hb = kcs_layer_hb(x).view((x.size(0), -1))
         k_hb = self.kcs_path_5(psi_vec_hb)
 

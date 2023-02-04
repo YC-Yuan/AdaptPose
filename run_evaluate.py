@@ -38,13 +38,13 @@ def main(args):
 
     print('==> Evaluating...')
     
-    # error_h36m_p1, error_h36m_p2 = evaluate(data_dict['H36M_test'], model_pos, device,pad=args.pad)
-    # print('H36M: Protocol #1   (MPJPE) overall average: {:.2f} (mm)'.format(error_h36m_p1))
-    # print('H36M: Protocol #2 (P-MPJPE) overall average: {:.2f} (mm)'.format(error_h36m_p2))
+    error_h36m_p1, error_h36m_p2 = evaluate(data_dict['H36M_test'], model_pos, device,pad=args.pad)
+    print('H36M: Protocol #1   (MPJPE) overall average: {:.2f} (mm)'.format(error_h36m_p1))
+    print('H36M: Protocol #2 (P-MPJPE) overall average: {:.2f} (mm)'.format(error_h36m_p2))
 
     error_3dhp_p1, error_3dhp_p2 = evaluate(data_dict['mpi3d_loader'], model_pos, device,flipaug='_flip',pad=args.pad,tag='3dhp') 
-    print('3DHP: Protocol #1   (MPJPE) overall average: {:.2f} (mm)'.format(error_3dhp_p1))
-    print('3DHP: Protocol #2 (P-MPJPE) overall average: {:.2f} (mm)'.format(error_3dhp_p2))
+    print('测试集: Protocol #1   (MPJPE) overall average: {:.2f} (mm)'.format(error_3dhp_p1))
+    print('测试集: Protocol #2 (P-MPJPE) overall average: {:.2f} (mm)'.format(error_3dhp_p2))
 
 
 if __name__ == '__main__':

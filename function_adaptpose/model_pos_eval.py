@@ -10,14 +10,16 @@ from common.data_loader import PoseDataSet
 from common.viz import plot_16j
 from progress.bar import Bar
 from utils.data_utils import fetch
-from utils.loss import mpjpe, p_mpjpe, compute_PCK, compute_AUC,n_mpjpe
+from utils.loss import mpjpe, p_mpjpe, compute_PCK, compute_AUC, n_mpjpe
 from utils.utils import AverageMeter
 
 
 ####################################################################
-# ### evaluate p1 p2 pck auc dataset with test-flip-augmentation 
+# ### evaluate p1 p2 pck auc dataset with test-flip-augmentation
 ####################################################################
-def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key='', tag='', flipaug='',pad=13,scale=True):
+
+# data_loader:数据集，model_pos_eval复制了训练中参数的posenet模型
+def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key='', tag='', flipaug='', pad=13, scale=True):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     epoch_p1 = AverageMeter()
@@ -31,13 +33,16 @@ def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key
     end = time.time()
 
     bar = Bar('Eval posenet on {}'.format(key), max=len(data_loader))
+
+    # temp为数据集中数据
     for i, temp in enumerate(data_loader):
+        # 取出 输入2d和目标3d
         targets_3d, inputs_2d = temp[0], temp[1]
-        inputs_2d=inputs_2d[:,0]
-        if pad>0:
-            rows=torch.sum(inputs_2d==0,dim=(-1,-2,-3))<(2*pad+1)*16*2
-            inputs_2d=inputs_2d[rows]
-            targets_3d=targets_3d[rows]
+        inputs_2d = inputs_2d[:, 0]
+        if pad > 0:
+            rows = torch.sum(inputs_2d == 0, dim=(-1, -2, -3)) < (2*pad+1)*16*2
+            inputs_2d = inputs_2d[rows]
+            targets_3d = targets_3d[rows]
         # Measure data loading time
         data_time.update(time.time() - end)
         num_poses = targets_3d.size(0)
@@ -50,57 +55,64 @@ def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key
                 out_left = [4, 5, 6, 10, 11, 12]
                 out_right = [1, 2, 3, 13, 14, 15]
                 inputs_2d_flip = inputs_2d.detach().clone()
-                inputs_2d_flip[:,:,:, 0] *= -1
-                inputs_2d_flip[:,  :,joints_left + joints_right, :] = inputs_2d_flip[:,  :,joints_right + joints_left, :]
-                outputs_3d_flip = model_pos_eval(inputs_2d_flip).view(num_poses, -1, 3).cpu()
+                inputs_2d_flip[:, :, :, 0] *= -1
+                inputs_2d_flip[:, :, joints_left + joints_right,
+                               :] = inputs_2d_flip[:, :, joints_right + joints_left, :]
+                # 3d flip
+                outputs_3d_flip = model_pos_eval(
+                    inputs_2d_flip).view(num_poses, -1, 3).cpu()
                 outputs_3d_flip[:, :, 0] *= -1
-                outputs_3d_flip[:, out_left + out_right, :] = outputs_3d_flip[:, out_right + out_left, :]
-                
-                outputs_3d = model_pos_eval(inputs_2d).view(num_poses, -1, 3).cpu()
-                outputs_3d_flip_rev = model_pos_eval(inputs_2d_flip.flip(1)).view(num_poses, -1, 3).cpu()
+                outputs_3d_flip[:, out_left + out_right,
+                                :] = outputs_3d_flip[:, out_right + out_left, :]
+                # 3d
+                outputs_3d = model_pos_eval(
+                    inputs_2d).view(num_poses, -1, 3).cpu()
+                # 3d flip rev
+                outputs_3d_flip_rev = model_pos_eval(
+                    inputs_2d_flip.flip(1)).view(num_poses, -1, 3).cpu()
                 outputs_3d_flip_rev[:, :, 0] *= -1
-                outputs_3d_flip_rev[:, out_left + out_right, :] = outputs_3d_flip_rev[:, out_right + out_left, :]
-                
-                outputs_3d_rev = model_pos_eval(inputs_2d.flip(1)).view(num_poses, -1, 3).cpu()
-                
+                outputs_3d_flip_rev[:, out_left + out_right,
+                                    :] = outputs_3d_flip_rev[:, out_right + out_left, :]
+                # 3d rev
+                outputs_3d_rev = model_pos_eval(
+                    inputs_2d.flip(1)).view(num_poses, -1, 3).cpu()
 
-                # We use the average human hip to neck length length based on the following survey to fix some of the 
+                # We use the average human hip to neck length length based on the following survey to fix some of the
                 # problems in scale ambiguity while doing cross-dataset evaluation http://tools.openlab.psu.edu/publicData/ANSURII-TR15-007.pdf
-                if scale: 
-                    bone_real=0.52 # this is a average human hip to neck length based on the following survey
-                    bone_pred=np.mean(np.linalg.norm(outputs_3d[:,0,:]-outputs_3d[:,8,:],axis=-1))
+                if scale:
+                    bone_real = 0.52  # this is a average human hip to neck length based on the following survey
+                    bone_pred = np.mean(np.linalg.norm(
+                        outputs_3d[:, 0, :]-outputs_3d[:, 8, :], axis=-1))
                     outputs_3d = outputs_3d*bone_real/bone_pred
                     outputs_3d_rev = outputs_3d_rev*bone_real/bone_pred
-                    outputs_3d_flip=outputs_3d_flip*bone_real/bone_pred
-                    outputs_3d_flip_rev=outputs_3d_flip_rev*bone_real/bone_pred
-                
-                outputs_3d = (outputs_3d + outputs_3d_flip+outputs_3d_flip_rev+outputs_3d_rev) / 4.0
+                    outputs_3d_flip = outputs_3d_flip*bone_real/bone_pred
+                    outputs_3d_flip_rev = outputs_3d_flip_rev*bone_real/bone_pred
 
+                # 四者平均作为结果
+                outputs_3d = (outputs_3d + outputs_3d_flip +
+                              outputs_3d_flip_rev+outputs_3d_rev) / 4.0
+
+            # 无flip
             else:
-
-                
-
-                
-                outputs_3d = model_pos_eval(inputs_2d).view(num_poses,  16, 3).cpu()
-
-                # We use the average human hip to neck length length based on the following survey to fix some of the 
+                outputs_3d = model_pos_eval(
+                    inputs_2d).view(num_poses,  16, 3).cpu()
+                # We use the average human hip to neck length length based on the following survey to fix some of the
                 # problems in scale ambiguity while doing cross-dataset evaluation http://tools.openlab.psu.edu/publicData/ANSURII-TR15-007.pdf)
                 if scale:
-                    bone_real=0.52
-                    bone_pred=np.mean(np.linalg.norm(outputs_3d[:,0,:]-outputs_3d[:,8,:],axis=-1))
+                    bone_real = 0.52
+                    bone_pred = np.mean(np.linalg.norm(
+                        outputs_3d[:, 0, :]-outputs_3d[:, 8, :], axis=-1))
                     outputs_3d = outputs_3d*bone_real/bone_pred
-             
-        # caculate the relative position.
-    
-        targets_3d=targets_3d[:,0,pad,:]
-        
 
-        targets_3d = targets_3d[:, :, :] - targets_3d[:, :1, :]  # the output is relative to the 0 joint
+        # caculate the relative position.
+
+        targets_3d = targets_3d[:, 0, pad, :]
+
+        # the output is relative to the 0 joint
+        targets_3d = targets_3d[:, :, :] - targets_3d[:, :1, :]
         outputs_3d = outputs_3d[:, :, :] - outputs_3d[:, :1, :]
-        
-            
-       
-       
+
+        # 根据结果和目标，计算多个指标
         p1score = mpjpe(outputs_3d, targets_3d).item() * 1000.0
         epoch_p1.update(p1score, num_poses)
 
@@ -112,7 +124,8 @@ def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key
         #     for ii in range(0,len(outputs_3d),10):
         #         plot_16j(np.concatenate((outputs_3d[ii:ii+1].numpy(),targets_3d[ii:ii+1].numpy()),axis=0),frame_colors=['r','b'],frame_legend=['pred','gt'])
 
-        p2score = p_mpjpe(outputs_3d.numpy(), targets_3d.numpy()).item() * 1000.0 # #
+        p2score = p_mpjpe(outputs_3d.numpy(),
+                          targets_3d.numpy()).item() * 1000.0
         epoch_p2.update(p2score, num_poses)
 
         # # # compute AUC and PCK
@@ -129,12 +142,14 @@ def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key
                      '| MPJPE: {e1: .4f} | P-MPJPE: {e2: .4f} | N-MPJPE: {e3: .4f}' \
             .format(batch=i + 1, size=len(data_loader), data=data_time.avg, bt=batch_time.avg,
                     ttl=bar.elapsed_td, eta=bar.eta_td, e1=epoch_p1.avg,
-                    e2=epoch_p2.avg,e3=epoch_p1n.avg)
+                    e2=epoch_p2.avg, e3=epoch_p1n.avg)
         bar.next()
 
     if writer:
-        writer.add_scalar('posenet_{}'.format(key) + flipaug + '/p1score' + tag, epoch_p1.avg, summary.epoch)
-        writer.add_scalar('posenet_{}'.format(key) + flipaug + '/p2score' + tag, epoch_p2.avg, summary.epoch)
+        writer.add_scalar('posenet_{}'.format(key) + flipaug +
+                          '/p1score' + tag, epoch_p1.avg, summary.epoch)
+        writer.add_scalar('posenet_{}'.format(key) + flipaug +
+                          '/p2score' + tag, epoch_p2.avg, summary.epoch)
         # writer.add_scalar('posenet_{}'.format(key) + flipaug + '/_pck' + tag, epoch_pck.avg, summary.epoch)
         # writer.add_scalar('posenet_{}'.format(key) + flipaug + '/_auc' + tag, epoch_auc.avg, summary.epoch)
 
@@ -144,17 +159,22 @@ def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key
 
 #########################################
 # overall evaluation function
+# 把当前训练的参数复制一份，用于效果检测
+# 分别对两个数据考察结果，每个数据返回mpjpe和p_mpjpe
 #########################################
-def evaluate_posenet(args, data_dict, model_pos, model_pos_eval, device, summary, writer, tag):
+def evaluate_posenet(args, data_dict, model_pos, model_pos_eval, device, summary, writer, tag=''):
     """
     evaluate H36M and 3DHP
     test-augment-flip only used for 3DHP as it does not help on H36M.
     """
     with torch.no_grad():
+        # 把posenet_model当前参数载入到evaluation用的副本中
         model_pos_eval.load_state_dict(model_pos.state_dict())
-        h36m_p1, h36m_p2 = evaluate(data_dict['H36M_test'], model_pos_eval, device, summary, writer,
-                                             key='H36M_test', tag=tag, flipaug='',pad=args.pad) 
-        dhp_p1, dhp_p2 = evaluate(data_dict['mpi3d_loader'], model_pos_eval, device, summary, writer,
-                                           key='mpi3d_loader', tag=tag,flipaug='_flip',pad=args.pad) 
-    return h36m_p1, h36m_p2, dhp_p1, dhp_p2
 
+        # 传入data_preparation中的GT2D-3D的验证集副本
+        h36m_p1, h36m_p2 = evaluate(data_dict['H36M_test'], model_pos_eval, device, summary, writer,
+                                    key='H36M_test', tag=tag, flipaug='', pad=args.pad)
+        # 传入data_preparation中的test_loader,即target dataset
+        dhp_p1, dhp_p2 = evaluate(data_dict['mpi3d_loader'], model_pos_eval, device, summary, writer,
+                                  key='mpi3d_loader', tag=tag, flipaug='_flip', pad=args.pad)
+    return h36m_p1, h36m_p2, dhp_p1, dhp_p2

@@ -24,12 +24,15 @@ def get_parse_args():
     parser = argparse.ArgumentParser(description='PyTorch training script')
 
     # General arguments
+    # 只接受h36m，不需要指定，没有意义
     parser.add_argument('--dataset', default='h36m', type=str, metavar='NAME', help='source dataset')
+    # 3dhp 3dpw h36m skii
     parser.add_argument('--dataset_target', default='3dhp', type=str, metavar='NAME', help='target dataset')
     parser.add_argument('--keypoints', default='gt', type=str, metavar='NAME', help='2D detections to use, \
     gt/hr/cpn_ft_h36m_dbb/detectron_ft_h36m')
     parser.add_argument('--keypoints_target', default='gt', type=str, metavar='NAME', help='2D detections to use, \
     gt/hr/cpn_ft_h36m_dbb/detectron_ft_h36m')
+    # 默认*即空
     parser.add_argument('--actions', default='*', type=str, metavar='LIST',
                         help='actions to train/test on, separated by comma, or * for all')
     parser.add_argument('--checkpoint', default='checkpoint/debug', type=str, metavar='PATH',
@@ -51,7 +54,7 @@ def get_parse_args():
     # Training detail
     parser.add_argument('--batch_size', default=1024, type=int, metavar='N',
                         help='batch size in terms of predicted frames')
-    parser.add_argument('--epochs', default=50, type=int, metavar='N', help='number of training epochs')
+    parser.add_argument('--epochs', default=20, type=int, metavar='N', help='number of training epochs')
     parser.add_argument('--decay_epoch', default=0, type=int, metavar='N', help='number of decay epochs')
 
     # Learning rate
@@ -68,6 +71,8 @@ def get_parse_args():
     parser.add_argument('--pretrain', default=True, type=lambda x: (str(x).lower() == 'true'), help='pretrain model')
     parser.add_argument('--pretrain_path', default='', type=str, metavar='FILENAME',
                         help='path to pretrained model')
+                        
+    # s1only选择h36m上的数据范围，默认全部，True后s1
     parser.add_argument('--s1only', default=False, type=lambda x: (str(x).lower() == 'true'), help='train S1 only')
     parser.add_argument('--num_workers', default=2, type=int, metavar='N', help='num of workers for data loading')
     parser.add_argument('--pad', type=int, default=13)

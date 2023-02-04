@@ -19,7 +19,7 @@ def get_parse_args():
     parser.add_argument('--snapshot', default=25, type=int, help='save models_baseline for every (default: 20)')
     parser.add_argument('--note', default='debug', type=str, help='additional name on checkpoint directory')
 
-    # Evaluate choice
+    # 选择要评估的ckpt
     parser.add_argument('--evaluate', default='', type=str, metavar='FILENAME',
                         help='checkpoint to evaluate (file name)')
     parser.add_argument('--action-wise', default=True, type=lambda x: (str(x).lower() == 'true'), help='train s1only')

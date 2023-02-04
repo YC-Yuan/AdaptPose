@@ -142,8 +142,11 @@ def get_bone_lengthbypose3d(x, bone_dim=2):
 
 
 def get_bone_unit_vecbypose3d(x, num_joints=16, bone_dim=2):
+    # 3d点转骨骼向量
     bonevec = get_BoneVecbypose3d(x)
+    # 3d点获取骨骼长度
     bonelength = get_bone_lengthbypose3d(x)
+    # 3d骨骼单位向量
     bone_unitvec = bonevec / (bonelength+0.000001)
     return bone_unitvec
 

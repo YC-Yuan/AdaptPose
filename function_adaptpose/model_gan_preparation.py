@@ -7,15 +7,17 @@ from models_adaptpose.PosDiscriminator import Pos2dDiscriminator, Pos2dDiscrimin
 from models_adaptpose.gan_generator import PoseGenerator
 from utils.utils import get_scheduler
 
-
+# 网络结构在此
 def get_poseaug_model(args, dataset):
 
     # Create model: G and D
     print("==> Creating model...")
     device = torch.device("cuda")
+
+    # 这里的dataset就是H36M数据集3D数据
     num_joints = dataset.skeleton().num_joints()
 
-    # generator for PoseAug
+    # MotionGneerator，关节点数*三维？
     model_G = PoseGenerator(args, num_joints * 3).to(device)
     model_G.apply(init_weights)
     print("==> Total parameters: {:.2f}M".format(sum(p.numel() for p in model_G.parameters()) / 1000000.0))
@@ -30,7 +32,7 @@ def get_poseaug_model(args, dataset):
     model_d2d.apply(init_weights)
     print("==> Total parameters: {:.2f}M".format(sum(p.numel() for p in model_d2d.parameters()) / 1000000.0))
 
-    # discriminator for 2D
+    # discriminator for 2D 貌似没用到
     model_d2d_temp = Pos2dDiscriminator_temp(num_joints).to(device)
     model_d2d_temp.apply(init_weights)
     print("==> Total parameters: {:.2f}M".format(sum(p.numel() for p in model_d2d_temp.parameters()) / 1000000.0))
