@@ -1,8 +1,11 @@
+from utils.gan_utils import get_bone_unit_vecbypose3d, get_pose3dbyBoneVec, get_BoneVecbypose3d
 import torch
 import torch.nn as nn
 import pytorch3d.transforms as torch3d
 from common.viz import plot_16j
 import numpy as np
+
+
 class KCSpath(nn.Module):
     def __init__(self, num_joints=16, channel=1000, channel_mid=100):
         super(KCSpath, self).__init__()
@@ -24,6 +27,7 @@ class KCSpath(nn.Module):
         y = self.relu(self.layer_last(d2_psi))
         y = self.layer_pred(y)
         return y
+
 
 class KCSpath2d(nn.Module):
     def __init__(self, num_joints=16, channel=1000, channel_mid=100):
@@ -47,8 +51,6 @@ class KCSpath2d(nn.Module):
 
         return y
 
-from utils.gan_utils import get_bone_unit_vecbypose3d, get_pose3dbyBoneVec, get_BoneVecbypose3d
-
 
 class Pos3dDiscriminator(nn.Module):
     def __init__(self, num_joints=16, kcs_channel=256, channel_mid=100):
@@ -66,13 +68,13 @@ class Pos3dDiscriminator(nn.Module):
 
     def forward(self, inputs_3d):
         # convert 3d pose to root relative
-        inputs_3d=inputs_3d.squeeze()
+        inputs_3d = inputs_3d.squeeze()
         x = inputs_3d - inputs_3d[:, :1, :]  # x: root relative
         # 根据3d点，计算骨骼的单位向量
         bv_unit = get_bone_unit_vecbypose3d(x)
         x = get_pose3dbyBoneVec(bv_unit)
 
-        ## Perturbation on:
+        # Perturbation on:
         # x_axis=torch.rand(x.shape).cuda()
         # x_axis = x_axis/torch.linalg.norm(x_axis,dim=-1,keepdim=True)
         # x_axis = x_axis*10/180*3.14
@@ -80,12 +82,12 @@ class Pos3dDiscriminator(nn.Module):
         # x_rM=x_rM.view(x.shape[0],x.shape[1],3,3)
 
         # modifyed_x=torch.matmul(x_rM,x.unsqueeze(-1)).squeeze()
-        
-        ## Perturbation off:
-        modifyed_x=x
+
+        # Perturbation off:
+        modifyed_x = x
         # plot_16j(np.concatenate((modifyed_x[:1].cpu().detach().numpy(),x[:1].cpu().detach().numpy()),axis=0),frame_legend=['mod','gt'])
         # KCS path
-        
+
         # 左手
         psi_vec_lh = kcs_layer_lh(modifyed_x).view((x.size(0), -1))
         k_lh = self.kcs_path_1(psi_vec_lh)
@@ -149,7 +151,7 @@ def kcs_layer_lh(x, num_joints=16):
     """
     left hand
     """
-    
+
     bv = get_BoneVecbypose3d(x)
     mask = torch.zeros_like(bv)
     hb_idx = [7, 9, 10, 11]
@@ -171,7 +173,28 @@ def kcs_layer_rh(x, num_joints=16):
     Psi = torch.matmul(bv, bv.permute(0, 2, 1).contiguous())
     return Psi
 
+# 简化程序结构
+# def get_part_index(part):
+#     parts_info = {
+#         'hb': [0, 3, 6, 7, 8, 9, 12], # torso part
+#         'rl': [0, 3, 4, 5, 6],  # right leg
+#         'll': [0, 1, 2, 3, 6],  # left leg
+#         'lh': [7, 9, 10, 11],  # left hand
+#         'rh': [7, 12, 13, 14],  # right hand
+#     }
+#     assert part in parts_info
+#     return parts_info[part]
+        
 
+
+# def kcs_layer_part(x, part):
+#     part_idx=get_part_index(part)
+#     bv = get_BoneVecbypose3d(x)
+#     mask = torch.zeros_like(bv)
+#     mask[:, part_idx, :] = 1
+#     bv = bv * mask
+#     Psi = torch.matmul(bv, bv.permute(0, 2, 1).contiguous())
+#     return Psi
 
 
 class Pos3dDiscriminator_temp(nn.Module):
@@ -190,13 +213,13 @@ class Pos3dDiscriminator_temp(nn.Module):
 
     def forward(self, inputs_3d):
         # convert 3d pose to root relative
-        inputs_3d=inputs_3d.squeeze()
+        inputs_3d = inputs_3d.squeeze()
         x = inputs_3d - inputs_3d[:, :, :1, :]  # x: root relative
         bv_unit = get_bone_unit_vecbypose3d(x)
         x = get_pose3dbyBoneVec(bv_unit)
-        x = x[:,1:]-x[:,:-1]
+        x = x[:, 1:]-x[:, :-1]
         # KCS path
-        psi_vec_lh = kcs_layer_lh_temp(x).view((x.size(0),-1))
+        psi_vec_lh = kcs_layer_lh_temp(x).view((x.size(0), -1))
         k_lh = self.kcs_path_1(psi_vec_lh)
 
         psi_vec_rh = kcs_layer_rh_temp(x).view((x.size(0), -1))
@@ -222,9 +245,9 @@ def kcs_layer_hb_temp(x, num_joints=16):
     bv = get_BoneVecbypose3d(x)
     mask = torch.zeros_like(bv)
     hb_idx = [0, 3, 6, 7, 8, 9, 12]
-    mask[:,:, hb_idx, :] = 1
+    mask[:, :, hb_idx, :] = 1
     bv = bv * mask
-    Psi = torch.matmul(bv, bv.permute(0,1, 3, 2).contiguous())
+    Psi = torch.matmul(bv, bv.permute(0, 1, 3, 2).contiguous())
     return Psi
 
 
@@ -235,9 +258,9 @@ def kcs_layer_rl_temp(x, num_joints=16):
     bv = get_BoneVecbypose3d(x)
     mask = torch.zeros_like(bv)
     hb_idx = [0, 3, 4, 5, 6]
-    mask[:, :,hb_idx, :] = 1
+    mask[:, :, hb_idx, :] = 1
     bv = bv * mask
-    Psi = torch.matmul(bv, bv.permute(0,1, 3, 2).contiguous())
+    Psi = torch.matmul(bv, bv.permute(0, 1, 3, 2).contiguous())
     return Psi
 
 
@@ -248,9 +271,9 @@ def kcs_layer_ll_temp(x, num_joints=16):
     bv = get_BoneVecbypose3d(x)
     mask = torch.zeros_like(bv)
     hb_idx = [0, 1, 2, 3, 6]
-    mask[:, :,hb_idx, :] = 1
+    mask[:, :, hb_idx, :] = 1
     bv = bv * mask
-    Psi = torch.matmul(bv, bv.permute(0, 1,3, 2).contiguous())
+    Psi = torch.matmul(bv, bv.permute(0, 1, 3, 2).contiguous())
     return Psi
 
 
@@ -274,9 +297,9 @@ def kcs_layer_rh_temp(x, num_joints=16):
     bv = get_BoneVecbypose3d(x)
     mask = torch.zeros_like(bv)
     hb_idx = [7, 12, 13, 14]
-    mask[:, :,hb_idx, :] = 1
+    mask[:, :, hb_idx, :] = 1
     bv = bv * mask
-    Psi = torch.matmul(bv, bv.permute(0, 1,3, 2).contiguous())
+    Psi = torch.matmul(bv, bv.permute(0, 1, 3, 2).contiguous())
     return Psi
 
 
@@ -310,9 +333,9 @@ class Pos2dDiscriminator(nn.Module):
 
 
 class Pos2dDiscriminator_temp(nn.Module):
-    def __init__(self, num_joints=16,win_length=243):
+    def __init__(self, num_joints=16, win_length=243):
         super(Pos2dDiscriminator_temp, self).__init__()
-        
+
         # Pose path
         self.pose_layer_1 = nn.Linear((win_length-1)*num_joints * 2, 100)
         self.pose_layer_2 = nn.Linear(100, 100)
@@ -326,8 +349,8 @@ class Pos2dDiscriminator_temp(nn.Module):
 
     def forward(self, x):
         # Pose path
-        x=x.squeeze()
-        x=x[:,1:]-x[:,:-1]
+        x = x.squeeze()
+        x = x[:, 1:]-x[:, :-1]
         x = x.contiguous().view(x.size(0), -1)
         d1 = self.relu(self.pose_layer_1(x))
         d2 = self.relu(self.pose_layer_2(d1))
@@ -354,7 +377,8 @@ class Pos2dDiscriminator_kcs(nn.Module):
         # self.kcs_path_2 = KCSpath(channel=kcs_channel, channel_mid=channel_mid)
         # self.kcs_path_3 = KCSpath(channel=kcs_channel, channel_mid=channel_mid)
         # self.kcs_path_4 = KCSpath(channel=kcs_channel, channel_mid=channel_mid)
-        self.kcs_path_5 = KCSpath2d(channel=kcs_channel, channel_mid=channel_mid)
+        self.kcs_path_5 = KCSpath2d(
+            channel=kcs_channel, channel_mid=channel_mid)
         # Pose path
         self.pose_layer_1 = nn.Linear(num_joints * 2, 100)
         self.pose_layer_2 = nn.Linear(100, 100)
@@ -370,7 +394,7 @@ class Pos2dDiscriminator_kcs(nn.Module):
 
     def forward(self, inputs_2d):
         # convert 3d pose to root relative
-        inputs_2d=inputs_2d.squeeze()
+        inputs_2d = inputs_2d.squeeze()
         x = inputs_2d
 
         psi_vec_hb = kcs_layer_hb_2d(x).view((x.size(0), -1))
@@ -383,7 +407,7 @@ class Pos2dDiscriminator_kcs(nn.Module):
         d4 = self.pose_layer_4(d3)
 
         d_last = self.relu(self.layer_last(d4))
-        d_last=torch.cat((k_hb,d_last),dim=-1)
+        d_last = torch.cat((k_hb, d_last), dim=-1)
         d_out = self.relu(self.layer_pred1(d_last))
         d_out = self.layer_pred2(d_out)
         return d_out
@@ -395,7 +419,7 @@ def kcs_layer_hb_2d(x, num_joints=16):
     """
     bv = get_BoneVecbypose3d(x)
     mask = torch.zeros_like(bv)
-    hb_idx = [0, 1,2,3,4,5, 6, 7, 8, 9,10,11, 12,13,14]
+    hb_idx = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
     mask[:, hb_idx, :] = 1
     bv = bv * mask
     Psi = torch.matmul(bv, bv.permute(0, 2, 1).contiguous())

@@ -17,33 +17,34 @@ import torch.nn as nn
 
 from utils.gan_utils import get_bone_unit_vecbypose3d, get_pose3dbyBoneVec, get_BoneVecbypose3d
 
+
 def kcs_layer_hb_2d(x, num_joints=16):
     """
     torso part
     """
     bv = get_BoneVecbypose3d(x)
     mask = torch.zeros_like(bv)
-    hb_idx = [0, 1,2,3,4,5, 6, 7, 8, 9,10,11, 12,13,14]
+    hb_idx = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
     mask[:, hb_idx, :] = 1
     bv = bv * mask
-    
-    Psi = torch.matmul(bv, bv.permute(0,1, 3, 2).contiguous())
+
+    Psi = torch.matmul(bv, bv.permute(0, 1, 3, 2).contiguous())
     return Psi
 
-# 基类
+
 class TemporalModelBase(nn.Module):
     """
     Do not instantiate this class.
     """
-    
+
     def __init__(self, num_joints_in, in_features, num_joints_out,
                  filter_widths, causal, dropout, channels):
         super().__init__()
-        
+
         # Validate input
         for fw in filter_widths:
             assert fw % 2 != 0, 'Only odd filter widths are supported'
-        
+
         self.num_joints_in = num_joints_in
         self.in_features = in_features
         self.num_joints_out = num_joints_out
@@ -51,21 +52,20 @@ class TemporalModelBase(nn.Module):
 
         self.drop = nn.Dropout(dropout)
         self.relu = nn.ReLU(inplace=True)
-        
+
         # 整除，3//2出来是1，1//2出来是0
-        self.pad = [ filter_widths[0] // 2 ]
+        self.pad = [filter_widths[0] // 2] # [1]
 
         self.expand_bn = nn.BatchNorm1d(channels, momentum=0.1)
         # out在此生效，用于shrink，指定输出
         # in_channels, out_channels, kernel_size
         self.shrink = nn.Conv1d(channels, num_joints_out*3, 1)
-        
 
     def set_bn_momentum(self, momentum):
         self.expand_bn.momentum = momentum
         for bn in self.layers_bn:
             bn.momentum = momentum
-            
+
     def receptive_field(self):
         """
         Return the total receptive field of this model as # of frames.
@@ -74,7 +74,7 @@ class TemporalModelBase(nn.Module):
         for f in self.pad:
             frames += f
         return 1 + 2*frames
-    
+
     def total_causal_shift(self):
         """
         Return the asymmetric offset for sequence padding.
@@ -87,52 +87,56 @@ class TemporalModelBase(nn.Module):
             frames += self.causal_shift[i] * next_dilation
             next_dilation *= self.filter_widths[i]
         return frames
-        
+
     def forward(self, x):
         if len(x.shape) == 5:
-            x=x[:,0]
+            x = x[:, 0]
         assert x.shape[-2] == self.num_joints_in
         assert x.shape[-1] == self.in_features
-        
+
         sz = x.shape[:3]
-        
+
         # Psi=kcs_layer_hb_2d(x,num_joints=self.num_joints_in)
         # x1 = Psi.view(Psi.shape[0], Psi.shape[1], -1)
         # x = get_BoneVecbypose3d(x)
-     
+
         x = x.reshape(x.shape[0], x.shape[1], -1)
         x = x.permute(0, 2, 1)
-        
+
         x = self._forward_blocks(x)
 
-        x = x.permute(0, 2, 1)
-        x = x.view(sz[0], -1, (self.num_joints_out), 3)
+        x = x.permute(0, 2, 1)  # 交换维度顺序，从123变成132
+        x = x.view(sz[0], -1, (self.num_joints_out), 3)  # 拉成一列，重新填充到形状
         # x = x[:,13]
         # post process
         x = x.view(sz[0],  (self.num_joints_out) * 3)
         # x = get_pose3dbyBoneVec(x)
         # out: 15 joint ==> 16 joint
-        out = torch.cat([torch.zeros_like(x)[:,:3], x], 1).view(sz[0], 16, 3)  # Pad hip joint (0,0,0)
+        out = torch.cat([torch.zeros_like(x)[:, :3], x], 1).view(
+            sz[0], 16, 3)  # Pad hip joint (0,0,0)
 
         return out
 
-# 使用的类
+# 无时序版本
+
+
 class TemporalModelOptimized1f(TemporalModelBase):
     """
     3D pose estimation model optimized for single-frame batching, i.e.
     where batches have input length = receptive field, and output length = 1.
     This scenario is only used for training when stride == 1.
-    
+
     This implementation replaces dilated convolutions with strided convolutions
     to avoid generating unused intermediate results. The weights are interchangeable
     with the reference implementation.
     """
+
     # 使用时filter_widths给的是[3,3,3]
     def __init__(self, num_joints_in, in_features, num_joints_out,
                  filter_widths, causal=False, dropout=0.25, channels=1024):
         """
         Initialize this model.
-        
+
         Arguments:
         num_joints_in -- number of input joints (e.g. 17 for Human3.6M)
         in_features -- number of input features for each joint (typically 2 for 2D input)
@@ -142,57 +146,68 @@ class TemporalModelOptimized1f(TemporalModelBase):
         dropout -- dropout probability
         channels -- number of convolution channels
         """
-        super().__init__(num_joints_in, in_features, num_joints_out, filter_widths, causal, dropout, channels)
+        super().__init__(num_joints_in, in_features, num_joints_out,
+                         filter_widths, causal, dropout, channels)
 
         # expand层用filter_width[0做设置]
-        self.expand_conv = nn.Conv1d(num_joints_in*in_features, channels, filter_widths[0], stride=filter_widths[0], bias=False)
-        
+        self.expand_conv = nn.Conv1d(
+            num_joints_in*in_features, channels, filter_widths[0], stride=filter_widths[0], bias=False)
+
         layers_conv = []
         layers_bn = []
-        
-        self.causal_shift = [ (filter_widths[0] // 2) if causal else 0 ]
+
+        self.causal_shift = [(filter_widths[0] // 2) if causal else 0]
         next_dilation = filter_widths[0]
 
-        # 遍历filter_width逐层配置，3or4，expand层+3～4层+shrink层的卷积
+        # 遍历filter_width逐层配置，默认配置[3,3,3]下，隐藏两层
         for i in range(1, len(filter_widths)):
-            self.pad.append((filter_widths[i] - 1)*next_dilation // 2)
+            self.pad.append((filter_widths[i] - 1)*next_dilation // 2) # [1] [1,3] [1,3,9]
             self.causal_shift.append((filter_widths[i]//2) if causal else 0)
-            
-            layers_conv.append(nn.Conv1d(channels, channels, filter_widths[i], stride=filter_widths[i], bias=False))
+            # in_channel; out_channel; kernel_size; stride; padding
+            layers_conv.append(nn.Conv1d(
+                channels, channels, filter_widths[i], stride=filter_widths[i], bias=False))
             layers_bn.append(nn.BatchNorm1d(channels, momentum=0.1))
-            layers_conv.append(nn.Conv1d(channels, channels, 1, dilation=1, bias=False))
+            layers_conv.append(
+                nn.Conv1d(channels, channels, 1, dilation=1, bias=False))
             layers_bn.append(nn.BatchNorm1d(channels, momentum=0.1))
             next_dilation *= filter_widths[i]
-            
+
         self.layers_conv = nn.ModuleList(layers_conv)
         self.layers_bn = nn.ModuleList(layers_bn)
-        
+
     def _forward_blocks(self, x):
         # conv+bn
         x = self.drop(self.relu(self.expand_bn(self.expand_conv(x))))
-        # 从0遍历到self.pad长度-2，共(self.pad的长度-1)次
+        # 默认配置下pad为[1,3,9]，i仅遍历到0
         for i in range(len(self.pad) - 1):
-            # causal False则shift为0
-            res = x[:, :, self.causal_shift[i+1] + self.filter_widths[i+1]//2 :: self.filter_widths[i+1]]
-            # 过conv、bn
-            x = self.drop(self.relu(self.layers_bn[2*i](self.layers_conv[2*i](x))))
-            # 再过相邻的conv、bn，然后加偏移
-            x = res + self.drop(self.relu(self.layers_bn[2*i + 1](self.layers_conv[2*i + 1](x))))
+            # 默认配置下causal = False，shift为0
+            res = x[:, :, self.causal_shift[i+1] +
+                    self.filter_widths[i+1]//2:: self.filter_widths[i+1]]
+            # 第一层内部conv、bn、relu、drop
+            x = self.drop(
+                self.relu(self.layers_bn[2*i](self.layers_conv[2*i](x))))
+            # 第二层内部conv、bn、relu、drop，然后加偏移
+            x = res + \
+                self.drop(
+                    self.relu(self.layers_bn[2*i + 1](self.layers_conv[2*i + 1](x))))
         # shrink中蕴涵了out
         x = self.shrink(x)
         return x
 
+# 时序卷积模型
+
+
 class TemporalModel(TemporalModelBase):
     """
-    Reference 3D pose estimation model with temporal convolutions.
+    Reference 3D pose estimation model with temporal convolut"""  """ions.
     This implementation can be used for all use-cases.
     """
-    
+
     def __init__(self, num_joints_in, in_features, num_joints_out,
                  filter_widths, causal=False, dropout=0.25, channels=1024, dense=False):
         """
         Initialize this model.
-        
+
         Arguments:
         num_joints_in -- number of input joints (e.g. 17 for Human3.6M)
         in_features -- number of input features for each joint (typically 2 for 2D input)
@@ -203,45 +218,54 @@ class TemporalModel(TemporalModelBase):
         channels -- number of convolution channels
         dense -- use regular dense convolutions instead of dilated convolutions (ablation experiment)
         """
-        super().__init__(num_joints_in, in_features, num_joints_out, filter_widths, causal, dropout, channels)
-        
-        self.expand_conv = nn.Conv1d(num_joints_in*in_features, channels, filter_widths[0], bias=False)
-        
+        super().__init__(num_joints_in, in_features, num_joints_out,
+                         filter_widths, causal, dropout, channels)
+
+        self.expand_conv = nn.Conv1d(
+            num_joints_in*in_features, channels, filter_widths[0], bias=False)
+
         layers_conv = []
         layers_bn = []
-        
-        self.causal_shift = [ (filter_widths[0]) // 2 if causal else 0 ]
+
+        self.causal_shift = [(filter_widths[0]) // 2 if causal else 0]
 
         next_dilation = filter_widths[0]
         for i in range(1, len(filter_widths)):
             self.pad.append((filter_widths[i] - 1)*next_dilation // 2)
-            self.causal_shift.append((filter_widths[i]//2 * next_dilation) if causal else 0)
-            
+            self.causal_shift.append(
+                (filter_widths[i]//2 * next_dilation) if causal else 0)
+
             layers_conv.append(nn.Conv1d(channels, channels,
-                                         filter_widths[i] if not dense else (2*self.pad[-1] + 1),
+                                         filter_widths[i] if not dense else (
+                                             2*self.pad[-1] + 1),
                                          dilation=next_dilation if not dense else 1,
                                          bias=False))
             layers_bn.append(nn.BatchNorm1d(channels, momentum=0.1))
-            layers_conv.append(nn.Conv1d(channels, channels, 1, dilation=1, bias=False))
+            layers_conv.append(
+                nn.Conv1d(channels, channels, 1, dilation=1, bias=False))
             layers_bn.append(nn.BatchNorm1d(channels, momentum=0.1))
-            
+
+            # dilation指数增加
             next_dilation *= filter_widths[i]
-            
+
         self.layers_conv = nn.ModuleList(layers_conv)
         self.layers_bn = nn.ModuleList(layers_bn)
-        
+
     # 前向使用，最终用shrink输出
     def _forward_blocks(self, x):
         # expand层
         x = self.drop(self.relu(self.expand_bn(self.expand_conv(x))))
-        
+
         for i in range(len(self.pad) - 1):
             pad = self.pad[i+1]
             shift = self.causal_shift[i+1]
-            res = x[:, :, pad + shift : x.shape[2] - pad + shift]
+            res = x[:, :, pad + shift: x.shape[2] - pad + shift]
             # 前向计算
-            x = self.drop(self.relu(self.layers_bn[2*i](self.layers_conv[2*i](x))))
-            x = res + self.drop(self.relu(self.layers_bn[2*i + 1](self.layers_conv[2*i + 1](x))))
+            x = self.drop(
+                self.relu(self.layers_bn[2*i](self.layers_conv[2*i](x))))
+            x = res + \
+                self.drop(
+                    self.relu(self.layers_bn[2*i + 1](self.layers_conv[2*i + 1](x))))
 
         x = self.shrink(x)
         return x

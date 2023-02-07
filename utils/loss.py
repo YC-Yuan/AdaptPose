@@ -129,16 +129,14 @@ def p_mpjpe(predicted, target):
     often referred to as "Protocol #2" in many papers.
     """
     assert predicted.shape == target.shape
-
+    
+    # 1. 对齐的scale、transform、rotation参数所需的预先计算
     muX = np.mean(target, axis=1, keepdims=True)
     muY = np.mean(predicted, axis=1, keepdims=True)
-
     X0 = target - muX
     Y0 = predicted - muY
-
     normX = np.sqrt(np.sum(X0 ** 2, axis=(1, 2), keepdims=True))
     normY = np.sqrt(np.sum(Y0 ** 2, axis=(1, 2), keepdims=True))
-
     X0 /= normX
     Y0 /= normY
 
@@ -151,17 +149,18 @@ def p_mpjpe(predicted, target):
     sign_detR = np.sign(np.expand_dims(np.linalg.det(R), axis=1))
     V[:, :, -1] *= sign_detR
     s[:, -1] *= sign_detR.flatten()
+    
+    # 2. 计算参数
     R = np.matmul(V, U.transpose(0, 2, 1))  # Rotation
-
     tr = np.expand_dims(np.sum(s, axis=1, keepdims=True), axis=2)
 
     a = tr * normX / normY  # Scale
     t = muX - a * np.matmul(muY, R)  # Translation
 
-    # Perform rigid transformation on the input
+    # 3. 对预测结果施加对齐变换
     predicted_aligned = a * np.matmul(predicted, R) + t
 
-    # Return MPJPE
+    # 4. 对齐后，计算mpjpe
     return np.mean(np.linalg.norm(predicted_aligned - target, axis=len(target.shape) - 1))
 
 

@@ -48,6 +48,7 @@ def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key
         num_poses = targets_3d.size(0)
         inputs_2d = inputs_2d.to(device)
 
+        # 此处应用模型，将2d数据转为3d
         with torch.no_grad():
             if flipaug:  # flip the 2D pose Left <-> Right
                 joints_left = [4, 5, 6, 10, 11, 12]
@@ -91,7 +92,6 @@ def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key
                 # 四者平均作为结果
                 outputs_3d = (outputs_3d + outputs_3d_flip +
                               outputs_3d_flip_rev+outputs_3d_rev) / 4.0
-
             # 无flip
             else:
                 outputs_3d = model_pos_eval(
@@ -112,7 +112,6 @@ def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key
         targets_3d = targets_3d[:, :, :] - targets_3d[:, :1, :]
         outputs_3d = outputs_3d[:, :, :] - outputs_3d[:, :1, :]
 
-        # 根据结果和目标，计算多个指标
         p1score = mpjpe(outputs_3d, targets_3d).item() * 1000.0
         epoch_p1.update(p1score, num_poses)
 
@@ -156,12 +155,113 @@ def evaluate(data_loader, model_pos_eval, device, summary=None, writer=None, key
     bar.finish()
     return epoch_p1.avg, epoch_p2.avg
 
+# divide_method是二维数组，规定以什么方式做统计
+# 如[[1,2],[3,4]]表明1 2两点在一起统计，3 4两点在一起统计
+
+
+def evaluate_part(data_loader, model_pos_eval, divid_method):
+    # 16个点，分别统计
+    point_num = 16
+    p1_list = []
+    p2_list = []
+    for i in range(point_num):
+        p1_list.append(AverageMeter())
+        p2_list.append(AverageMeter())
+
+    device = torch.device("cuda")
+    model_pos_eval.eval()
+    for i, temp in enumerate(data_loader):
+        # if i>0:
+        # continue
+        # [1024,1,27,16,3] [1024,1,27,16,2]
+        targets_3d, inputs_2d = temp[0], temp[1]
+        # [1024,27,16,2]
+        inputs_2d = inputs_2d[:, 0]
+
+        # pad=13,>0一直成立
+        pad = 13
+        rows = torch.sum(inputs_2d == 0, dim=(-1, -2, -3)) < (2*pad+1)*16*2
+        inputs_2d = inputs_2d[rows]
+        targets_3d = targets_3d[rows]
+
+        num_poses = targets_3d.size(0)
+        inputs_2d = inputs_2d.to(device)
+
+        # 应用模型，2d转3d
+        with torch.no_grad():
+            joints_left = [4, 5, 6, 10, 11, 12]
+            joints_right = [1, 2, 3, 13, 14, 15]
+            out_left = [4, 5, 6, 10, 11, 12]
+            out_right = [1, 2, 3, 13, 14, 15]
+            inputs_2d_flip = inputs_2d.detach().clone()
+            inputs_2d_flip[:, :, :, 0] *= -1
+            inputs_2d_flip[:, :, joints_left + joints_right,
+                           :] = inputs_2d_flip[:, :, joints_right + joints_left, :]
+            # 3d flip
+            outputs_3d_flip = model_pos_eval(
+                inputs_2d_flip).view(num_poses, -1, 3).cpu()
+            outputs_3d_flip[:, :, 0] *= -1
+            outputs_3d_flip[:, out_left + out_right,
+                            :] = outputs_3d_flip[:, out_right + out_left, :]
+            # 3d
+            outputs_3d = model_pos_eval(
+                inputs_2d).view(num_poses, -1, 3).cpu()
+            # 3d flip rev
+            outputs_3d_flip_rev = model_pos_eval(
+                inputs_2d_flip.flip(1)).view(num_poses, -1, 3).cpu()
+            outputs_3d_flip_rev[:, :, 0] *= -1
+            outputs_3d_flip_rev[:, out_left + out_right,
+                                :] = outputs_3d_flip_rev[:, out_right + out_left, :]
+            # 3d rev
+            outputs_3d_rev = model_pos_eval(
+                inputs_2d.flip(1)).view(num_poses, -1, 3).cpu()
+
+            # We use the average human hip to neck length length based on the following survey to fix some of the
+            # problems in scale ambiguity while doing cross-dataset evaluation http://tools.openlab.psu.edu/publicData/ANSURII-TR15-007.pdf
+            bone_real = 0.52  # this is a average human hip to neck length based on the following survey
+            bone_pred = np.mean(np.linalg.norm(
+                outputs_3d[:, 0, :]-outputs_3d[:, 8, :], axis=-1))
+            outputs_3d = outputs_3d*bone_real/bone_pred
+            outputs_3d_rev = outputs_3d_rev*bone_real/bone_pred
+            outputs_3d_flip = outputs_3d_flip*bone_real/bone_pred
+            outputs_3d_flip_rev = outputs_3d_flip_rev*bone_real/bone_pred
+
+            # 四者平均作为结果
+            outputs_3d = (outputs_3d + outputs_3d_flip +
+                          outputs_3d_flip_rev+outputs_3d_rev) / 4.0
+
+        # caculate the relative position.
+        targets_3d = targets_3d[:, 0, pad, :]
+        # the output is relative to the 0 joint
+        # shape都是[num_poses,16，3]
+        targets_3d = targets_3d[:, :, :] - targets_3d[:, :1, :]
+        outputs_3d = outputs_3d[:, :, :] - outputs_3d[:, :1, :]
+        # 切分成16个[num_poses,1,3]
+        targets_parts = torch.split(targets_3d, 1, dim=1)
+        outputs_parts = torch.split(outputs_3d, 1, dim=1)
+        # 16个点分别积累
+        for i in range(point_num):
+            tp=targets_parts[i]
+            op=outputs_parts[i]
+            print(tp.shape)
+            print(op.shape)
+            mpjpe_score = mpjpe(op, tp).item()*1000.0
+            # pmpjpe_score = p_mpjpe(op, tp).item()*1000.0 # 这行出问题！
+            p1_list[i].update(mpjpe_score, num_poses)
+    #         p2_list[i].update(pmpjpe_score, num_poses)
+        
+    for i in range(point_num):
+        p1_list[i]=p1_list[i].avg
+        # p2_list[i]=p2_list[i].avg
+    return p1_list,p2_list
 
 #########################################
 # overall evaluation function
 # 把当前训练的参数复制一份，用于效果检测
 # 分别对两个数据考察结果，每个数据返回mpjpe和p_mpjpe
 #########################################
+
+
 def evaluate_posenet(args, data_dict, model_pos, model_pos_eval, device, summary, writer, tag=''):
     """
     evaluate H36M and 3DHP

@@ -1,13 +1,13 @@
 from __future__ import print_function, absolute_import, division
 
-import glob
-
 import torch
 
-from models_baseline.mlp.linear_model import LinearModel, init_weights
-from models_baseline.videopose.model_VideoPose3D import TemporalModelOptimized1f, TemporalModel
+from models_baseline.mlp.linear_model import init_weights
+from models_baseline.videopose.model_VideoPose3D import TemporalModelOptimized1f
 
 # 模型在这里定义
+
+
 def model_pos_preparation(args, dataset, device):
     """
     return a posenet Model: with Bx16x2 --> posenet --> Bx16x3
