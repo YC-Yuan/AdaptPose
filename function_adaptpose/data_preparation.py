@@ -30,7 +30,7 @@ def data_preparation(args, remove_static_joints=True):
     keypoints_path = path.join(
         'data', 'data_2d_' + args.dataset + '_' + args.keypoints + '.npz')
     print('==> Loading 2D detections at %s ...' % keypoints_path)
-    keypoints = create_2d_data(path.join('data', 'data_2d_' + args.dataset + '_' + args.keypoints + '.npz'),
+    keypoints = create_2d_data(keypoints_path,
                                dataset, tag=args.dataset_target)
     # 默认None，即不选择actions
     action_filter = None if args.actions == '*' else args.actions.split(',')
@@ -46,9 +46,10 @@ def data_preparation(args, remove_static_joints=True):
     ############################################
 
     # 取出数据，训练和验证准备两份 pose pose2d action camera
+    # train:600个数据的四种字段
     poses_train, poses_train_2d, actions_train, cams_train = fetch(subjects_train, dataset, keypoints, action_filter,
                                                                    stride)
-
+    # valid:236个数据的四种字段
     poses_valid, poses_valid_2d, actions_valid, cams_valid = fetch(subjects_test, dataset, keypoints, action_filter,
                                                                    stride)
 

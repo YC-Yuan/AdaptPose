@@ -17,13 +17,14 @@ class PoseDataSet(Dataset):
 
         self._poses_3d = poses_3d
         self._poses_2d = poses_2d
+        # actions是二维数组，此处将其拆开拼成一维数组
         self._actions = reduce(lambda x, y: x + y, actions)
         self._cams = cams
         self._pad=pad
 
         assert self._poses_3d.shape[0] == self._poses_2d.shape[0] and self._poses_3d.shape[0] == len(self._actions)
         assert self._poses_3d.shape[0] == self._cams.shape[0]
-        print('Generating {} poses...'.format(len(self._actions)))
+        # print('Generating {} poses...'.format(len(self._actions)))
 
     def __getitem__(self, index):
 
@@ -133,7 +134,7 @@ class PoseTarget(Dataset):
         assert poses is not None
         # self._poses = np.concatenate(poses)
         self._poses = poses
-        print('Generating {} poses...'.format(self._poses.shape[0]))
+        # print('Generating {} poses...'.format(self._poses.shape[0]))
 
     def __getitem__(self, index):
         out_pose = self._poses[index]

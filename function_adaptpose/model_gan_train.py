@@ -22,8 +22,11 @@ from utils.data_utils import random_loader
 import pytorch3d.transforms as torch3d
 import matplotlib
 # matplotlib.use('Qt5Agg')
+from utils.log import Logger
 import matplotlib.pyplot as plt
 import os
+
+logger=Logger.get_singleton()
 
 # criterion计算均方误差
 def get_adv_loss(model_dis, data_real, data_fake, criterion, summary, writer, writer_name):
@@ -128,6 +131,7 @@ def get_diff_loss(args, bart_rlt_dict, summary, writer):
 
 def get_feedback_loss(args, model_pos, criterion, summary, writer,
                       inputs_2d, inputs_3d, outputs_2d_ba, outputs_3d_ba, outputs_2d_rt, outputs_3d_rt,target_2d,cam_param,pad):
+    # 评估posenet性能，2d通过模型生成3d，跟目标比较
     def get_posenet_loss(input_pose_2d, target_pose_3d):
         predict_pose_3d = model_pos(input_pose_2d).view(num_poses, -1, 3) #.view(num_poses, -1)
          
@@ -142,6 +146,7 @@ def get_feedback_loss(args, model_pos, criterion, summary, writer,
             torch.mean(posenet_loss[:, [3, 6, 12, 15]], dim=-1, keepdim=True)
         ], dim=-1)
         return posenet_loss
+    
     def get_posenet_loss_2d(input_pose_2d):
         
         predict_pose_3d = model_pos(input_pose_2d).view(num_poses, -1, 3) #.view(num_poses, -1)
@@ -157,14 +162,21 @@ def get_feedback_loss(args, model_pos, criterion, summary, writer,
 
     def fix_hard_ratio_loss(expected_hard_ratio, harder, easier):  # similar to MSE
         return torch.abs(1 - torch.exp(harder - expected_hard_ratio * easier))
-
+    
+    # 15, 17
     def fix_hardratio(target_std, taget_mean, harder, easier, gloss_factordiv, gloss_factorfeedback, tag=''):
+        # harder:fake数据在network上的loss，easier:原数据在network上的loss
         harder_value = harder / easier
-
+        # harder衡量:network在fake数据和原数据上的表现差距
         hard_std = torch.std(harder_value)
         hard_mean = torch.mean(harder_value)
-
+        
+        logger.record_args("进行Selection的参数:")
+        logger.record_args(harder_value.shape)
+        logger.record_args(harder_value)
+        
         hard_div_loss = torch.mean((hard_std - target_std) ** 2)
+        # 难度衡量结果，17，15
         hard_mean_loss, selection = diff_range_loss(harder_value, taget_mean, target_std)
 
         writer.add_scalar('train_G_iter_posenet_feedback/{}_hard_std'.format(tag), hard_std.mean().item(),
@@ -185,11 +197,13 @@ def get_feedback_loss(args, model_pos, criterion, summary, writer,
     device = torch.device("cuda")
     num_poses = inputs_2d.shape[0]
 
-    # outputs_2d_origin -> posenet -> outputs_3d_origin
+    # outputs_2d_origin -> posenet -> outputs_3d_origin, 用于selection
+    # 参数：GAN输入的3d来自于原数据集，2d由原数据+相机位置计算得出
     fake_pos_pair_loss_origin = get_posenet_loss(inputs_2d, inputs_3d)
-    # outputs_2d_ba -> posenet -> outputs_3d_ba
+    # outputs_2d_ba -> posenet -> outputs_3d_ba, 不同阶段输出算loss
     fake_pos_pair_loss_ba = get_posenet_loss(outputs_2d_ba.unsqueeze(1), outputs_3d_ba.unsqueeze(1))
-    # # outputs_2d_rt -> posenet -> outputs_3d_rt
+    # outputs_2d_rt -> posenet -> outputs_3d_rt，用于selection
+    # 参数:3d_rt为GAN最终生成的fake数据，2d同样根据原相机位置计算得出
     fake_pos_pair_loss_rt = get_posenet_loss(outputs_2d_rt.unsqueeze(1), outputs_3d_rt.unsqueeze(1))
     target_2d=target_2d.unsqueeze(1).unsqueeze(2).repeat(1,1,inputs_2d.shape[2],1,1)
 
@@ -198,12 +212,14 @@ def get_feedback_loss(args, model_pos, criterion, summary, writer,
     # pair up posenet loss
     ##########################################
     hardratio_ba = update_hardratio(args.hardratio_ba_s, args.hardratio_ba, summary.epoch, args.epochs)
+    # 用于selection，将epoch数从[0,要训练的epoch数]线性映射到[起点，终点]，默认配置下固定17（理论上随epoch线性递增）
     hardratio_rt = update_hardratio(args.hardratio_rt_s, args.hardratio_rt, summary.epoch, args.epochs)
 
     # get feedback loss
     pos_pair_loss_baToorigin, selection_ba = fix_hardratio(args.hardratio_std_ba, hardratio_ba,
                                              fake_pos_pair_loss_ba, fake_pos_pair_loss_origin,
                                              args.gloss_factordiv_ba, args.gloss_factorfeedback_ba, tag='ba')
+    # std_rt:15 _rt:17 div_rt:0 feedback_rt:1e-2
     pos_pair_loss_rtToorigin, selection_rt = fix_hardratio(args.hardratio_std_rt, hardratio_rt,
                                              fake_pos_pair_loss_rt, fake_pos_pair_loss_origin,
                                              args.gloss_factordiv_rt, args.gloss_factorfeedback_rt, tag='rt')
@@ -268,15 +284,16 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
 
     # 打印进度
     bar = Bar('Train pose gan', max=len(data_dict['train_gt2d3d_loader']))
-    # 拿数据做训练
-    for i, ((inputs_3d, _, _, cam_param), target_d2d, target_d3d,target_d3d2) in enumerate(zip(data_dict['train_gt2d3d_loader'], data_dict['target_2d_loader'], data_dict['target_3d_loader'],data_dict['target_3d_loader2'])):
+    # 拿数据做训练,1 batch有1024个
+    for i, ((inputs_3d, _, _, cam_param)ge, tart_d2d, target_d3d,target_d3d2) in enumerate(zip(data_dict['train_gt2d3d_loader'], data_dict['target_2d_loader'], data_dict['target_3d_loader'],data_dict['target_3d_loader2'])):
         # 一次训练300，section循环0 1 2 3 4
         if i>(section+1)*300 or i<section*300:
             continue
 
         pad=(inputs_3d.shape[2]-1)//2
-                
+        # 1024个数据，27不知道是啥，16*3是一个姿势，sum计算有几个0，右边是27*16*2
         rows=torch.sum(inputs_3d==0,dim=(-1,-2,-3,-4))<(2*pad+1)*16*2
+        # rows判断出来一堆True，True保留，False删除
         inputs_3d=inputs_3d[rows] # 原分布数据
         cam_param=cam_param[rows] # 相机角度
         target_d2d, target_d3d=target_d2d[rows], target_d3d[rows] # 目标分布2d、3d数据
@@ -303,7 +320,7 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
         inputs_3d, inputs_3d_random,target_d2d,cam_param = inputs_3d.to(device), inputs_3d_random.to(device),target_d2d.to(device),cam_param.to(device)
         inputs_2d = project_to_2d(inputs_3d, cam_param) # 根据相机角度，将输入3d投影为2d
 
-        # poseaug: BA（Bone Angle） BL（Bone Length） RT（Rotation Transform）
+        # poseaug: BA（Bone Angle） BL（Bone Length） RT（Rotation Transform）,生成动作
         g_rlt = model_G(inputs_3d_random,target_d2d)
 
         # extract the generator result
@@ -338,9 +355,13 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
 
         # posenet loss: to generate harder case.
         ###################################################
+        # 获取SELECTION
         feedback_loss,selection = get_feedback_loss(args, model_pos, criterion, summary, writer,
                                           inputs_2d, inputs_3d, outputs_2d_ba, outputs_3d_ba, outputs_2d_rt,
                                           outputs_3d_rt,target_d2d,cam_param,pad=pad) 
+        
+        # logger.record_args("======> Selection:")
+        # logger.record_args(selection)
 
         # 多个loss求和，2/3d的adv，diff_loss(鼓励多样性)
         if summary.epoch > args.warmup:                   
@@ -382,12 +403,13 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
         ##############################################
         # save fake data buffer for posenet training #
         ##############################################
-        # here add a check so that outputs_2d_rt that out of box will be remove.
+        # 剔除没被选中的数据
         outputs_3d_rt_selcted=outputs_3d_rt.detach()[selection.bool()]
         outputs_2d_rt_selected=outputs_2d_rt.detach()[selection.bool()]
         cam_param_selected=cam_param.detach()[selection.bool()]
         valid_rt_idx = torch.sum(outputs_2d_rt_selected > 1, dim=(1, 2,3)) < 1
         
+        # 生成的数据
         tmp_3d_pose_buffer_list.append(outputs_3d_rt_selcted.detach()[valid_rt_idx].cpu().numpy())
         tmp_2d_pose_buffer_list.append(outputs_2d_rt_selected.detach()[valid_rt_idx].cpu().numpy())
         tmp_camparam_buffer_list.append(cam_param_selected.detach()[valid_rt_idx].cpu().numpy())
@@ -423,7 +445,7 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
     ###################################
     # buffer loader will be used to save fake pose pair
     print('\nprepare buffer loader for train on fake pose')
-
+    # 将生成的数据更新到训练用数据集中
     if torch.sum(valid_rt_idx)>0:
         tmp_3d_pose_buffer_list=np.concatenate(tmp_3d_pose_buffer_list)
         tmp_2d_pose_buffer_list=np.concatenate(tmp_2d_pose_buffer_list)
@@ -436,5 +458,4 @@ def train_gan(args, poseaug_dict, data_dict, model_pos, criterion, fake_3d_sampl
                                         shuffle=True, num_workers=args.num_workers, pin_memory=True)
 
         data_dict['train_fake2d3d_loader'] = train_fake2d3d_loader
-
     return

@@ -19,8 +19,8 @@ def train_posenet(model_pos, data_loader, optimizer, criterion, device):
     set_grad([model_pos], True)
     model_pos.train()
     end = time.time()
-
-
+    
+    # data_loader: data_dict['train_fake2d3d_loader']
     bar = Bar('Train posenet', max=len(data_loader))
     for i, (targets_3d, inputs_2d, _, _) in enumerate(data_loader):
         # Measure data loading time
@@ -35,12 +35,12 @@ def train_posenet(model_pos, data_loader, optimizer, criterion, device):
             pad=(targets_3d.shape[2]-1)//2
             # targets_3d=targets_3d.squeeze()
             targets_3d=targets_3d[:,0,pad]
+            
         targets_3d = targets_3d[:, :, :] - targets_3d[:, :1, :]  # the output is relative to the 0 joint
-
+        # 输入2d，过模型，跟目标3d比较
         outputs_3d = model_pos(inputs_2d)
-
         optimizer.zero_grad()
-        
+        # 给输出和目标打分（均方误差损失）
         loss_3d_pos = criterion(outputs_3d, targets_3d)
         loss_3d_pos.backward()
         nn.utils.clip_grad_norm_(model_pos.parameters(), max_norm=1)

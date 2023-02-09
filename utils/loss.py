@@ -129,7 +129,7 @@ def p_mpjpe(predicted, target):
     often referred to as "Protocol #2" in many papers.
     """
     assert predicted.shape == target.shape
-    
+
     # 1. 对齐的scale、transform、rotation参数所需的预先计算
     muX = np.mean(target, axis=1, keepdims=True)
     muY = np.mean(predicted, axis=1, keepdims=True)
@@ -149,7 +149,7 @@ def p_mpjpe(predicted, target):
     sign_detR = np.sign(np.expand_dims(np.linalg.det(R), axis=1))
     V[:, :, -1] *= sign_detR
     s[:, -1] *= sign_detR.flatten()
-    
+
     # 2. 计算参数
     R = np.matmul(V, U.transpose(0, 2, 1))  # Rotation
     tr = np.expand_dims(np.sum(s, axis=1, keepdims=True), axis=2)
@@ -171,10 +171,13 @@ def n_mpjpe(predicted, target):
     """
     assert predicted.shape == target.shape
 
-    norm_predicted = torch.mean(torch.sum(predicted ** 2, dim=-1, keepdim=True), dim=-2, keepdim=True)
-    norm_target = torch.mean(torch.sum(target * predicted, dim=-1, keepdim=True), dim=-2, keepdim=True)
+    norm_predicted = torch.mean(
+        torch.sum(predicted ** 2, dim=-1, keepdim=True), dim=-2, keepdim=True)
+    norm_target = torch.mean(
+        torch.sum(target * predicted, dim=-1, keepdim=True), dim=-2, keepdim=True)
     scale = norm_target / norm_predicted
     return mpjpe(scale * predicted, target)
+
 
 def n_mpjpe_byjoint(predicted, target):
     """
@@ -183,11 +186,12 @@ def n_mpjpe_byjoint(predicted, target):
     """
     assert predicted.shape == target.shape
 
-    norm_predicted = torch.mean(torch.sum(predicted ** 2, dim=-1, keepdim=True), dim=-2, keepdim=True)
-    norm_target = torch.mean(torch.sum(target * predicted, dim=-1, keepdim=True), dim=-2, keepdim=True)
+    norm_predicted = torch.mean(
+        torch.sum(predicted ** 2, dim=-1, keepdim=True), dim=-2, keepdim=True)
+    norm_target = torch.mean(
+        torch.sum(target * predicted, dim=-1, keepdim=True), dim=-2, keepdim=True)
     scale = norm_target / (norm_predicted+0.00001)
     return mpjpe(scale * predicted, target)
-
 
 
 def mean_velocity_error(predicted, target):
@@ -215,7 +219,8 @@ def compute_PCK(gts, preds, scales=1000, eval_joints=None, threshold=150):
         pred = preds[n]
         # scale = scales[n]
         scale = 1000
-        per_joint_error = np.take(np.sqrt(np.sum(np.power(pred - gt, 2), 1)) * scale, eval_joints, axis=0)
+        per_joint_error = np.take(
+            np.sqrt(np.sum(np.power(pred - gt, 2), 1)) * scale, eval_joints, axis=0)
         true_positive += (per_joint_error < PCK_THRESHOLD).sum()
         total += per_joint_error.size
 
@@ -229,27 +234,38 @@ def compute_AUC(gts, preds, scales=1000, eval_joints=None):
     thresholds = np.linspace(0, 150, 31)
     pck_list = []
     for threshold in thresholds:
-        pck_list.append(compute_PCK(gts, preds, scales, eval_joints, threshold))
+        pck_list.append(compute_PCK(
+            gts, preds, scales, eval_joints, threshold))
 
     auc = np.mean(pck_list)
 
     return auc
 
+
 def diff_range_loss(a, b, std):
-    diff = (a - b) ** 2
-    weight = torch.where(diff > std ** 2, torch.ones_like(a), torch.zeros_like(a))
+    # a:难度衡量结果，b：目标均值17，std：目标标准差15
+    # torch.where:按规则合并，即根据条件填入1/0
+    
+    # 参数1计算
+    diff = (a - b) ** 2 # 均方误差
+    # 保留大误差，误差小的值归零
+    weight = torch.where(
+        diff > std ** 2, torch.ones_like(a), torch.zeros_like(a))
     diff_weighted = diff * weight
     
-    a_prim=torch.mean(a,dim=-1)
-    diff_selection = ( a_prim - 17) ** 2
-    selection = torch.where(diff_selection < 16 ** 2, torch.ones_like(a_prim), torch.zeros_like(a_prim))
+    # selection计算
+    a_prim = torch.mean(a, dim=-1) # 把最后一维求平均
+    diff_selection = (a_prim - 17) ** 2 # 平均后计算均方误差，误差小的选中、大的丢掉
+    selection = torch.where(diff_selection < 16 ** 2,
+                            torch.ones_like(a_prim), torch.zeros_like(a_prim))
 
     return diff_weighted.mean(), selection
 
 
 def rectifiedL2loss(gamma, threshold):  # threshold = b
     diff = (gamma - 0) ** 2
-    weight = torch.where(diff > threshold ** 2, torch.ones_like(gamma), torch.zeros_like(gamma))
+    weight = torch.where(diff > threshold ** 2,
+                         torch.ones_like(gamma), torch.zeros_like(gamma))
     diff_weighted = diff * weight
     return diff_weighted.mean()
 

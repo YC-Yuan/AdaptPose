@@ -1,11 +1,11 @@
 from __future__ import absolute_import
+import matplotlib.pyplot as plt
+import numpy as np
 
 import matplotlib
 
 matplotlib.use('Agg')
 
-import numpy as np
-import matplotlib.pyplot as plt
 
 __all__ = ['Logger', 'LoggerMonitor', 'savefig']
 
@@ -26,6 +26,7 @@ def plot_overlap(logger, names=None):
 
 class Logger(object):
     '''Save training process to log file with simple plot function.'''
+    _singleton = None
 
     def __init__(self, fpath,  args, title=None, resume=False):
         self.file = None
@@ -48,8 +49,11 @@ class Logger(object):
                 self.file = open(fpath, 'a')
             else:
                 self.file = open(fpath, 'w')
-
         self.record_args(args)
+        Logger._singleton=self
+    
+    def get_singleton():
+        return Logger._singleton
 
     def record_args(self, args):
         self.file.write(str(args))
@@ -108,5 +112,6 @@ class LoggerMonitor(object):
         legend_text = []
         for logger in self.loggers:
             legend_text += plot_overlap(logger, names)
-        plt.legend(legend_text, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+        plt.legend(legend_text, bbox_to_anchor=(
+            1.05, 1), loc=2, borderaxespad=0.)
         plt.grid(True)

@@ -112,7 +112,7 @@ def main(args):
             train_gan(args, poseaug_dict, data_dict, model_pos, criterion,
                       fake_3d_sample, fake_2d_sample, summary, writer, section=kk)
 
-            # warmup默认为2，大于2后train_posenet
+            # gan训练好了再迁移训练
             if summary.epoch > args.warmup:
                 train_posenet(
                     model_pos, data_dict['train_fake2d3d_loader'], posenet_optimizer, criterion, device)
